@@ -3,6 +3,7 @@
 namespace XcVm\Module\Watch;
 
 use XcVm\Cli\CommandInterface;
+use XcVm\Infrastructure\Tmdb\TmdbApiService;
 
 /**
  * WatchItemCommand — watch item command
@@ -53,8 +54,7 @@ class WatchItemCommand implements CommandInterface {
 			}
 			@unlink(WATCH_TMP_PATH . @getmypid() . '.wpid');
 		});
-		require_once MAIN_HOME . 'Modules/tmdb/lib/TmdbClient.php';
-		require MAIN_HOME . 'Modules/tmdb/lib/Release.php';
+		TmdbApiService::requireLibrary();
 
 		$rPayload = trim((string) $rArgs[0]);
 		$rDecodedPayload = base64_decode($rPayload, true);

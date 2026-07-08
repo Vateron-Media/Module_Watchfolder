@@ -855,7 +855,7 @@ class WatchItem {
                                         $rSeriesArray['year'] = intval(substr($rShowData['first_air_date'], 0, 4));
                                     }
                                     $rSeriesArray['genre'] = implode(', ', $rGenres);
-                                    $rSeriesArray['episode_run_time'] = intval($rShowData['episode_run_time'][0]);
+                                    $rSeriesArray['episode_run_time'] = intval($rShowData['episode_run_time'][0] ?? 0);
                                     if (count($rCategoryIDs) == 0) {
                                         if (0 < $rThreadData['max_genres']) {
                                             $rParsed = array_slice($rShowData['genres'], 0, $rThreadData['max_genres']);
@@ -944,20 +944,21 @@ class WatchItem {
                                         $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode);
                                     }
                                     $rEpisodes = json_decode($rTMDB->getSeason($rShowData['id'], intval($rReleaseSeason))->getJSON(), true);
-                                    foreach ($rEpisodes['episodes'] as $rEpisode) {
+                                    foreach (($rEpisodes['episodes'] ?? array()) as $rEpisode) {
                                         if (intval($rEpisode['episode_number']) == $rReleaseEpisode) {
-                                            if (strlen($rEpisode['still_path']) > 0) {
+                                            $rImage = '';
+                                            if (strlen($rEpisode['still_path'] ?? '') > 0) {
                                                 $rImage = 'https://image.tmdb.org/t/p/w1280' . $rEpisode['still_path'];
                                                 if (SettingsManager::getAll()['download_images']) {
                                                     $rImage = ImageUtils::downloadImage($rImage, 5);
                                                 }
                                             }
-                                            if (strlen($rEpisode['name']) > 0) {
+                                            if (strlen($rEpisode['name'] ?? '') > 0) {
                                                 $rImportArray['stream_display_name'] .= ' - ' . $rEpisode['name'];
                                             }
-                                            $rSeconds = intval($rShowData['episode_run_time'][0]) * 60;
+                                            $rSeconds = intval($rShowData['episode_run_time'][0] ?? 0) * 60;
                                             $rImportArray['movie_properties'] = array('tmdb_id' => $rEpisode['id'], 'release_date' => $rEpisode['air_date'], 'plot' => $rEpisode['overview'], 'duration_secs' => $rSeconds, 'duration' => sprintf('%02d:%02d:%02d', $rSeconds / 3600, ($rSeconds / 60) % 60, $rSeconds % 60), 'movie_image' => $rImage, 'video' => array(), 'audio' => array(), 'bitrate' => 0, 'rating' => $rEpisode['vote_average'], 'season' => $rReleaseSeason);
-                                            if (strlen($rImportArray['movie_properties']['movie_image'][0]) == 0) {
+                                            if (strlen($rImportArray['movie_properties']['movie_image']) == 0) {
                                                 unset($rImportArray['movie_properties']['movie_image']);
                                             }
                                         }
