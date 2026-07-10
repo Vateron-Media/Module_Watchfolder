@@ -61,7 +61,7 @@ class WatchController {
     }
 
     public function add() {
-        global $rMobile, $rSettings, $rPermissions, $language;
+        global $rMobile, $rSettings, $rPermissions, $language, $rTMDBLanguages;
 
         if (isset(RequestManager::getAll()['id'])) {
             $rFolder = StreamRepository::getWatchFolder(RequestManager::getAll()['id']);
