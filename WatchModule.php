@@ -60,7 +60,7 @@ class WatchModule extends BaseModule {
     }
 
     public function getVersion(): string {
-        return '1.0.4';
+        return '1.0.5';
     }
 
     /**
@@ -130,11 +130,16 @@ class WatchModule extends BaseModule {
     }
 
     public function registerNavbar(NavbarRegistry $registry): void {
-        $registry->add((new NavbarItem('topbar.settings.divider_modules'))
-            ->parent('topbar.settings')->makeDivider()->order(45));
-        $registry->add((new NavbarItem('topbar.settings.watch_settings'))
-            ->parent('topbar.settings')->url('settings_watch')
-            ->label('watch_settings')->permissions(['folder_watch_settings'])->order(50));
+        // Profile dropdown: core registers items under the 'profile' parent
+        // (CoreNavbarProvider::_profile), reserving order 100–980 for modules.
+        // watch owns the divider that separates core items from the folder
+        // settings group (watch + the plex dependency); orphan dividers are
+        // collapsed by NavbarRegistry::collapseDividers() when hidden by perms.
+        $registry->add((new NavbarItem('profile.folder_divider'))
+            ->parent('profile')->makeDivider()->order(100));
+        $registry->add((new NavbarItem('profile.watch_settings'))
+            ->parent('profile')->url('settings_watch')
+            ->label('watch_settings')->permissions(['folder_watch_settings'])->order(110));
         $registry->add((new NavbarItem('management.service_setup.watch'))
             ->parent('management.service_setup')->url('watch')
             ->label('folder_watch')->permissions(['folder_watch'])->order(60));
