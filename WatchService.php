@@ -281,4 +281,34 @@ class WatchService {
 		$db->query('DELETE FROM `watch_refresh` WHERE `stream_id` IN (' . $rIn . ');');
 		$db->query('DELETE FROM `watch_logs` WHERE `stream_id` IN (' . $rIn . ');');
 	}
+
+	/**
+	 * Mark a watch-folder log row as imported and link the created stream.
+	 *
+	 * Reacts to core's VodImportedEvent (dispatched by MovieService) so core no
+	 * longer touches this module's watch_logs table directly. A no-op when the
+	 * imported file was not one this watcher logged.
+	 *
+	 * @param int    $rStreamID  Created VOD stream id.
+	 * @param string $rPath      Source file path (server prefix already stripped).
+	 * @param int    $rType      VOD type (1 = movie).
+	 * @return void
+	 */
+	public static function markImported($rStreamID, $rPath, $rType = 1) {
+		if ((string) $rPath === '') {
+			return;
+		}
+		$db = self::db();
+		$db->query('UPDATE `watch_logs` SET `status` = 1, `stream_id` = ? WHERE `filename` = ? AND `type` = ?;', (int) $rStreamID, $rPath, (int) $rType);
+	}
+
+	/**
+	 * Truncate all folder-watch logs. Backs the module's "Clear Watch Logs"
+	 * Quick Tool (QuickToolsProviderInterface), moved out of core post.php.
+	 *
+	 * @return void
+	 */
+	public static function clearAllLogs() {
+		self::db()->query('TRUNCATE `watch_logs`;');
+	}
 }
