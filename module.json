@@ -3,7 +3,7 @@
     "hash_id": "2541abe329f151202d7a3c4ecfb17db4",
     "description": "Automatic folder watcher: scans local or rclone directories for new movies and TV episodes, matches items via TMDb, imports streams/episodes into the system, updates bouquets and categories, and supports auto-upgrade and encoding.",
     "version": "1.0.5",
-    "requires_core": ">=2.3.3",
+    "requires_core": ">=2.3.3 <=2.5.0",
     "environment": "any",
     "dependencies": [],
     "optional_dependencies": [],
