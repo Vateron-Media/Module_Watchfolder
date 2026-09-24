@@ -237,19 +237,19 @@ class WatchItem {
      * @param callable $rWriteCache
      * @return never
      */
-    private static function applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, $rLabel, callable $rWriteCache) {
+    public static function applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, $rLabel, callable $rWriteCache) {
         if (!$rThreadData['auto_upgrade']) {
             echo 'Upgrade disabled' . "\n";
-            exit();
+            throw new WatchItemHalt();
         }
         if (substr($rUpgradeData['source'], 0, 3 + strlen(strval(SERVER_ID))) != 's:' . SERVER_ID . ':') {
             echo "Old file path doesn't match this server, don't upgrade." . "\n";
-            exit();
+            throw new WatchItemHalt();
         }
         list(, $rActualPath) = explode('s:' . SERVER_ID . ':', $rUpgradeData['source']);
         if (file_exists($rActualPath) && filesize($rActualPath) >= filesize($rFile)) {
             echo "File isn't a better source, don't upgrade." . "\n";
-            exit();
+            throw new WatchItemHalt();
         }
         echo 'Upgrade ' . $rLabel . '!' . "\n";
         $db = self::db();
@@ -260,7 +260,7 @@ class WatchItem {
         }
         self::logWatchResult($rThreadType, $rFile, 6);
         $rWriteCache($rUpgradeData);
-        exit();
+        throw new WatchItemHalt();
     }
 
     /**
@@ -612,9 +612,15 @@ class WatchItem {
      * @param array $rCategoryIDs
      * @param array $rBouquetIDs
      * @param string|null $rLanguage
+     * @param callable|null $rFetchTrailer (int $rTMDBID, ?string $rLanguage): string. Defaults to
+     *        self::getSeriesTrailer(), a real HTTP call to api.themoviedb.org with no other seam;
+     *        tests for the "brand-new series" branch inject a fake here instead.
      * @return array ['importArray' => array, 'categoryIDs' => array, 'bouquetIDs' => array, 'series' => array|null]
      */
-    public static function buildSeriesImportArray($rTMDB, $rMatch, $rRelease, array $rThreadData, array $rSettings, array $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs, $rLanguage) {
+    public static function buildSeriesImportArray($rTMDB, $rMatch, $rRelease, array $rThreadData, array $rSettings, array $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs, $rLanguage, ?callable $rFetchTrailer = null) {
+        if ($rFetchTrailer === null) {
+            $rFetchTrailer = array(self::class, 'getSeriesTrailer');
+        }
         $rShow = $rTMDB->getTVShow($rMatch->get('id'));
         if ($rThreadData['duplicate_tmdb']) {
             $rUpgradeData = null;
@@ -656,7 +662,7 @@ class WatchItem {
             $rSeries = self::getSeriesByTMDB($rShowData['id']);
             if (!$rSeries) {
                 $rSeriesArray = array('title' => $rShowData['name'], 'category_id' => array(), 'episode_run_time' => 0, 'tmdb_id' => $rShowData['id'], 'cover' => '', 'genre' => '', 'plot' => $rShowData['overview'], 'cast' => '', 'rating' => $rShowData['vote_average'], 'director' => '', 'release_date' => $rShowData['first_air_date'], 'last_modified' => time(), 'seasons' => $rSeasonData, 'backdrop_path' => array(), 'youtube_trailer' => '', 'year' => null);
-                $rSeriesArray['youtube_trailer'] = self::getSeriesTrailer($rShowData['id'], (!empty($rThreadData['language']) ? $rThreadData['language'] : $rSettings['tmdb_language']));
+                $rSeriesArray['youtube_trailer'] = $rFetchTrailer($rShowData['id'], (!empty($rThreadData['language']) ? $rThreadData['language'] : $rSettings['tmdb_language']));
                 $rSeriesArray['cover'] = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rShowData['poster_path'];
                 $rSeriesArray['cover_big'] = $rSeriesArray['cover'];
                 $rSeriesArray['backdrop_path'] = array('https://image.tmdb.org/t/p/w1280' . $rShowData['backdrop_path']);
@@ -713,7 +719,7 @@ class WatchItem {
                     flock($rFileLock, LOCK_UN);
                     unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
                     self::logWatchResult($rThreadType, $rFile, 3);
-                    exit();
+                    throw new WatchItemHalt();
                 }
             } else {
                 $db->query('UPDATE `streams_series` SET `seasons` = ? WHERE `id` = ?;', json_encode($rSeasonData, JSON_UNESCAPED_UNICODE), $rSeries['id']);
@@ -778,7 +784,7 @@ class WatchItem {
      * @param array $rBouquetIDs
      * @return never
      */
-    private static function persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs) {
+    public static function persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs) {
         $db = self::db();
         if ($rThreadData['type'] == 'movie') {
             if (count($rCategoryIDs) == 0 && !empty($rThreadData['fb_category_id'])) {
@@ -798,14 +804,14 @@ class WatchItem {
             $rImportArray['category_id'] = '[' . implode(',', array_map('intval', $rCategoryIDs)) . ']';
             if (count($rCategoryIDs) == 0) {
                 self::logWatchResult($rThreadType, $rFile, 3);
-                exit();
+                throw new WatchItemHalt();
             }
         } else {
             if ($rSeries) {
                 $rImportArray['series_no'] = $rSeries['id'];
             } else {
                 self::logWatchResult($rThreadType, $rFile, 4);
-                exit();
+                throw new WatchItemHalt();
             }
         }
         if ($rThreadData['subtitles']) {
@@ -844,11 +850,11 @@ class WatchItem {
             }
             echo 'Success!' . "\n";
             self::logWatchResult($rThreadType, $rFile, 1, $rInsertID);
-            exit();
+            throw new WatchItemHalt();
         } else {
             echo 'Insert failed!' . "\n";
             self::logWatchResult($rThreadType, $rFile, 2);
-            exit();
+            throw new WatchItemHalt();
         }
     }
 
@@ -1050,34 +1056,42 @@ class WatchItem {
                             $rBouquetIDs = json_decode($rThreadData['bouquets'], true);
                         }
                     }
-                    if ($rMatch) {
-                        if ($rThreadData['type'] == 'movie') {
-                            $rBuilt = self::buildMovieImportArray($rTMDB, $rMatch, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
-                            $rImportArray = $rBuilt['importArray'];
-                            $rCategoryIDs = $rBuilt['categoryIDs'];
-                            $rBouquetIDs = $rBuilt['bouquetIDs'];
-                        } else {
-                            $rBuilt = self::buildSeriesImportArray($rTMDB, $rMatch, $rRelease ?? null, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
-                            $rImportArray = $rBuilt['importArray'];
-                            $rCategoryIDs = $rBuilt['categoryIDs'];
-                            $rBouquetIDs = $rBuilt['bouquetIDs'];
-                            $rSeries = $rBuilt['series'];
-                        }
-                    } else {
-                        if ($rThreadData['type'] == 'movie') {
-                            $rImportArray['stream_display_name'] = $rTitle;
-                            if ($rYear) {
-                                $rImportArray['year'] = $rYear;
+                    try {
+                        if ($rMatch) {
+                            if ($rThreadData['type'] == 'movie') {
+                                $rBuilt = self::buildMovieImportArray($rTMDB, $rMatch, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
+                                $rImportArray = $rBuilt['importArray'];
+                                $rCategoryIDs = $rBuilt['categoryIDs'];
+                                $rBouquetIDs = $rBuilt['bouquetIDs'];
+                            } else {
+                                $rBuilt = self::buildSeriesImportArray($rTMDB, $rMatch, $rRelease ?? null, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
+                                $rImportArray = $rBuilt['importArray'];
+                                $rCategoryIDs = $rBuilt['categoryIDs'];
+                                $rBouquetIDs = $rBuilt['bouquetIDs'];
+                                $rSeries = $rBuilt['series'];
                             }
                         } else {
-                            if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
-                                $rImportArray['stream_display_name'] = $rTitle . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode) . ' - ';
+                            if ($rThreadData['type'] == 'movie') {
+                                $rImportArray['stream_display_name'] = $rTitle;
+                                if ($rYear) {
+                                    $rImportArray['year'] = $rYear;
+                                }
+                            } else {
+                                if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
+                                    $rImportArray['stream_display_name'] = $rTitle . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode) . ' - ';
+                                }
                             }
+                            self::applyCommonStreamSettings($rImportArray, $rThreadData);
+                            $rImportArray['tmdb_language'] = $rLanguage;
                         }
-                        self::applyCommonStreamSettings($rImportArray, $rThreadData);
-                        $rImportArray['tmdb_language'] = $rLanguage;
+                        self::persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries ?? null, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs);
+                    } catch (WatchItemHalt) {
+                        // applyUpgrade()/buildSeriesImportArray()/persistImport() already
+                        // logged the outcome via logWatchResult() before throwing — this
+                        // mirrors the exit() they used to call (watch_item always runs as
+                        // its own process, so returning here ends it the same way).
+                        return;
                     }
-                    self::persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries ?? null, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs);
                 } else {
                     echo 'File is broken!' . "\n";
                     self::logWatchResult($rThreadType, $rFile, 5);

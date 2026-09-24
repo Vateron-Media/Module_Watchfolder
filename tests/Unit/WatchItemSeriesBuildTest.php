@@ -5,13 +5,13 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * WatchItem::buildSeriesImportArray() — the series-match branch extracted
- * out of run(). Only covers the "series already exists" path (getSeriesByTMDB
- * finds a `streams_series` row): the "brand-new series" branch unconditionally
- * calls getSeriesTrailer(), which makes a real file_get_contents() HTTP
- * request to api.themoviedb.org with no injection seam — that branch isn't
- * unit-testable without either a live network call or a stream-wrapper
- * override, so it's left uncovered here rather than faked into something
- * that doesn't prove anything. download_images is left off in every test so
+ * out of run(). Covers both the "series already exists" path (getSeriesByTMDB
+ * finds a `streams_series` row) and the "brand-new series" path (an INSERT).
+ * The new-series path unconditionally calls getSeriesTrailer(), a real
+ * file_get_contents() HTTP request to api.themoviedb.org with no seam of its
+ * own — buildSeriesImportArray() takes it as an injectable $rFetchTrailer
+ * callable instead (defaulting to the real getSeriesTrailer in production),
+ * so tests supply a fake here. download_images is left off in every test so
  * ImageUtils::downloadImage() (also a real HTTP fetch) never fires.
  */
 final class WatchItemSeriesBuildTest extends TestCase {
@@ -22,7 +22,8 @@ final class WatchItemSeriesBuildTest extends TestCase {
     protected function setUp(): void {
         $this->db = new TestDb();
         $this->db->exec('CREATE TABLE streams (id INTEGER PRIMARY KEY AUTOINCREMENT, `order` INTEGER);');
-        $this->db->exec('CREATE TABLE streams_series (id INTEGER PRIMARY KEY AUTOINCREMENT, tmdb_id INTEGER, seasons TEXT);');
+        $this->db->exec('CREATE TABLE streams_series (id INTEGER PRIMARY KEY AUTOINCREMENT, tmdb_id INTEGER, title TEXT, category_id TEXT, episode_run_time INTEGER, cover TEXT, cover_big TEXT, genre TEXT, plot TEXT, cast TEXT, rating REAL, director TEXT, release_date TEXT, last_modified INTEGER, seasons TEXT, backdrop_path TEXT, youtube_trailer TEXT, year INTEGER, tmdb_language TEXT);');
+        $this->db->exec('CREATE TABLE watch_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, server_id INTEGER, filename TEXT, status INTEGER, stream_id INTEGER);');
         WatchItem::setDb($this->db);
         $this->lockFile = WATCH_TMP_PATH . 'lock_1399';
     }
@@ -76,7 +77,7 @@ final class WatchItemSeriesBuildTest extends TestCase {
         ));
 
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false),
+            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/s01e01.mkv', 2, 60, 1, 1, array(), array(), array(), null
         );
 
@@ -97,7 +98,7 @@ final class WatchItemSeriesBuildTest extends TestCase {
         ));
 
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false),
+            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/s01e01.mkv', 2, 60, 1, 1, array(), array(), array(), null
         );
 
@@ -115,7 +116,7 @@ final class WatchItemSeriesBuildTest extends TestCase {
         ));
 
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, array('episode' => array(1, 2)), $this->threadData(), array('download_images' => false),
+            $rTMDB, $rMatch, array('episode' => array(1, 2)), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/s01e01e02.mkv', 2, 60, 1, 1, array(), array(), array(), null
         );
 
@@ -136,7 +137,7 @@ final class WatchItemSeriesBuildTest extends TestCase {
         // SxxExx prefix IS non-empty, so this asserts the prefix survives
         // when no per-episode title/data was found to append to it.
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false),
+            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/s01e01.mkv', 2, 60, 1, 99, array(), array(), array(), null
         );
 
@@ -155,11 +156,67 @@ final class WatchItemSeriesBuildTest extends TestCase {
         ));
 
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, null, $this->threadData(), array('download_images' => false),
+            $rTMDB, $rMatch, null, $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/unknown.mkv', 2, 60, null, null, array(), array(), array(), null
         );
 
         $this->assertArrayNotHasKey('stream_display_name', $rBuilt['importArray']);
+    }
+
+    public function testCreatesANewSeriesRecordUsingTheInjectedTrailerFetcher(): void {
+        // No pre-existing streams_series row for tmdb_id=1399: getSeriesByTMDB()
+        // returns null, so this exercises the INSERT branch instead of UPDATE.
+        $rMatch = new TVShow(array('id' => 1399));
+        $rTMDB = new FakeTmdbClient(array(
+            'getTVShow' => fn() => $this->showFixture(),
+            'getSeason' => fn() => $this->seasonFixture(array()),
+        ));
+        $rTrailerCalls = array();
+        $rFetchTrailer = function ($rID, $rLang) use (&$rTrailerCalls) {
+            $rTrailerCalls[] = array($rID, $rLang);
+            return 'trailer-key';
+        };
+
+        $rBuilt = WatchItem::buildSeriesImportArray(
+            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
+            array(1 => array(), 2 => array(18 => array('category_id' => 5, 'bouquets' => '[]'))),
+            '/media/got/s01e01.mkv', 2, 60, 1, 1, array(), array(), array(), null, $rFetchTrailer
+        );
+
+        $this->assertSame(array(array(1399, null)), $rTrailerCalls);
+        $this->assertNotNull($rBuilt['series']);
+        $this->db->query('SELECT COUNT(*) AS `count` FROM `streams_series`;');
+        $this->assertSame(1, (int) $this->db->get_col());
+        $this->db->query('SELECT `tmdb_id`, `title`, `youtube_trailer`, `category_id`, `genre` FROM `streams_series` WHERE `id` = ?;', $rBuilt['series']['id']);
+        $rRow = $this->db->get_row();
+        $this->assertSame('1399', (string) $rRow['tmdb_id']);
+        $this->assertSame('Game of Thrones', $rRow['title']);
+        $this->assertSame('trailer-key', $rRow['youtube_trailer']);
+        $this->assertSame('[5]', $rRow['category_id']);
+        $this->assertSame('Drama', $rRow['genre']);
+    }
+
+    public function testNewSeriesWithNoCategoryResolvedHaltsInsteadOfInserting(): void {
+        $rMatch = new TVShow(array('id' => 1399));
+        $rTMDB = new FakeTmdbClient(array(
+            'getTVShow' => fn() => $this->showFixture(),
+            'getSeason' => fn() => $this->seasonFixture(array()),
+        ));
+
+        try {
+            WatchItem::buildSeriesImportArray(
+                $rTMDB, $rMatch, array('episode' => 1), $this->threadData(), array('download_images' => false, 'tmdb_language' => null),
+                array(1 => array(), 2 => array()), // no watch_categories mapping for genre 18
+                '/media/got/s01e01.mkv', 2, 60, 1, 1, array(), array(), array(), null,
+                fn() => 'trailer-key'
+            );
+            $this->fail('Expected WatchItemHalt');
+        } catch (\XcVm\Module\Watch\WatchItemHalt) {
+        }
+
+        $this->db->query('SELECT COUNT(*) AS `count` FROM `streams_series`;');
+        $this->assertSame(0, (int) $this->db->get_col());
+        $this->assertFileDoesNotExist($this->lockFile);
     }
 
     public function testAppliesCommonStreamSettingsWithEnableTranscodeLeftOff(): void {
@@ -173,7 +230,7 @@ final class WatchItemSeriesBuildTest extends TestCase {
         ));
 
         $rBuilt = WatchItem::buildSeriesImportArray(
-            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(array('transcode_profile_id' => 7)), array('download_images' => false),
+            $rTMDB, $rMatch, array('episode' => 1), $this->threadData(array('transcode_profile_id' => 7)), array('download_images' => false, 'tmdb_language' => null),
             array(1 => array(), 2 => array()), '/media/got/s01e01.mkv', 2, 60, 1, 1, array(), array(), array(), null
         );
 
