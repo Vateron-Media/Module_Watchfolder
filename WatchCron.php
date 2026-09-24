@@ -32,6 +32,15 @@ require_once __DIR__ . '/../../Core/Process/Multithread.php';
 class WatchCron {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
+    /** Расширения, сканируемые по умолчанию, если в папке не заданы свои. */
+    private const DEFAULT_WATCH_EXTENSIONS = array('mp4', 'mkv', 'avi', 'mpg', 'flv', '3gp', 'm4v', 'flv', 'wmv', 'mov', 'ts');
+
+    /** Расширения субтитров, которые auto_subtitles ищет рядом с медиафайлом. */
+    private const SUBTITLE_EXTENSIONS = array('srt', 'sub', 'sbv');
+
+    /** Файл считается "дозаписанным" и готовым к обработке через N секунд после последнего изменения. */
+    private const FILE_STABLE_SECONDS = 30;
+
 
     /**
     * Get watch categories from the database.
@@ -77,29 +86,24 @@ class WatchCron {
      */
     public static function checkBouquets() {
         $db = self::db();
-        $a39a336ad3894348 = array();
-        $rBouquets = glob(WATCH_TMP_PATH . '*.bouquet');
-        foreach ($rBouquets as $D3e2134ebfab5c71) {
-            $rBouquet = json_decode(file_get_contents($D3e2134ebfab5c71), true);
-            if (!isset($a39a336ad3894348[$rBouquet['bouquet_id']])) {
-                $a39a336ad3894348[$rBouquet['bouquet_id']] = array('movie' => array(), 'series' => array());
+        $rBouquetUpdates = array();
+        $rBouquetFiles = glob(WATCH_TMP_PATH . '*.bouquet');
+        foreach ($rBouquetFiles as $rBouquetFile) {
+            $rBouquet = json_decode(file_get_contents($rBouquetFile), true);
+            if (!isset($rBouquetUpdates[$rBouquet['bouquet_id']])) {
+                $rBouquetUpdates[$rBouquet['bouquet_id']] = array('movie' => array(), 'series' => array());
             }
-            $a39a336ad3894348[$rBouquet['bouquet_id']][$rBouquet['type']][] = $rBouquet['id'];
-            unlink($D3e2134ebfab5c71);
+            $rBouquetUpdates[$rBouquet['bouquet_id']][$rBouquet['type']][] = $rBouquet['id'];
+            unlink($rBouquetFile);
         }
-        foreach ($a39a336ad3894348 as $rBouquetID => $rBouquetData) {
+        foreach ($rBouquetUpdates as $rBouquetID => $rBouquetData) {
             $rBouquet = self::getBouquet($rBouquetID);
             if ($rBouquet) {
                 foreach (array('movie', 'series') as $rType) {
-                    if ($rType == 'movie') {
-                        $rColumn = 'bouquet_movies';
-                    } else {
-                        $rColumn = 'bouquet_series';
-                    }
+                    $rColumn = ($rType == 'movie') ? 'bouquet_movies' : 'bouquet_series';
                     $rChannels = json_decode($rBouquet[$rColumn], true);
                     foreach ($rBouquetData[$rType] as $rID) {
-                        if (0 >= intval($rID) || in_array($rID, $rChannels)) {
-                        } else {
+                        if (intval($rID) > 0 && !in_array($rID, $rChannels)) {
                             $rChannels[] = $rID;
                         }
                     }
@@ -159,7 +163,9 @@ class WatchCron {
         $db = self::db();
         global $rThreadCount;
         global $rScanOffset;
-        global $F7fa29461a8a5ee2;
+        global $F7fa29461a8a5ee2; // max_items — задаётся во внешнем bootstrap'е, имя менять нельзя
+        $rMaxFilesPerRun = $F7fa29461a8a5ee2;
+        $rSettings = SettingsManager::getAll();
         $rWatchCategories = array(1 => self::getWatchCategories(1), 2 => self::getWatchCategories(2));
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
@@ -207,6 +213,7 @@ class WatchCron {
             unset($rTMDBDatabase);
             echo 'Finished generating cache!' . "\n";
         }
+        $rStreamDatabaseSet = array_flip($rStreamDatabase ?? array());
         foreach ($rRows as $rRow) {
             $db->query('UPDATE `watch_folders` SET `last_run` = UNIX_TIMESTAMP() WHERE `id` = ?;', $rRow['id']);
             $rExtensions = json_decode($rRow['allowed_extensions'], true);
@@ -214,25 +221,24 @@ class WatchCron {
                 $rExtensions = array();
             }
             if (count($rExtensions) == 0) {
-                $rExtensions = array('mp4', 'mkv', 'avi', 'mpg', 'flv', '3gp', 'm4v', 'flv', 'wmv', 'mov', 'ts');
+                $rExtensions = self::DEFAULT_WATCH_EXTENSIONS;
             }
             $rSubtitles = $rFiles = array();
             if (0 < strlen($rRow['rclone_dir'])) {
                 $rCommand = 'rclone --config "' . CONFIG_PATH . 'rclone.conf" lsjson ' . escapeshellarg($rRow['rclone_dir']) . ' -R --fast-list --files-only';
-                exec($rCommand, $a364ed03b3639bd1, $Ee034ad5c6b0c8a3);
-                $rData = implode(' ', $a364ed03b3639bd1);
-                if (!substr($rData, 0, 1) != '[') {
-                } else {
-                    $rData = '[' . explode('[', $rData, 1)[1];
+                exec($rCommand, $rRcloneFiles);
+                $rData = implode(' ', $rRcloneFiles);
+                if (substr($rData, 0, 1) !== '[') {
+                    $rData = '[' . explode('[', $rData, 2)[1];
                 }
-                $a364ed03b3639bd1 = json_decode($rData, true);
-                foreach ($a364ed03b3639bd1 as $rFile) {
+                $rRcloneFiles = json_decode($rData, true);
+                foreach ($rRcloneFiles as $rFile) {
                     $rFile['Path'] = rtrim($rRow['directory'], '/') . '/' . $rFile['Path'];
                     if (count($rExtensions) == 0 || in_array(strtolower(pathinfo($rFile['Name'])['extension']), $rExtensions)) {
                         $rFiles[] = $rFile['Path'];
                     }
                     if (isset($rRow['auto_subtitles'])) {
-                        if (in_array(strtolower(pathinfo($rFile['Path'])['extension']), array('srt', 'sub', 'sbv'))) {
+                        if (in_array(strtolower(pathinfo($rFile['Path'])['extension']), self::SUBTITLE_EXTENSIONS)) {
                             $rSubtitles[] = $rFile['Path'];
                         }
                     }
@@ -244,33 +250,33 @@ class WatchCron {
                 } else {
                     $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '"';
                 }
-                exec($rCommand, $rFiles, $Ee034ad5c6b0c8a3);
+                exec($rCommand, $rFiles);
                 if (isset($rRow['auto_subtitles'])) {
-                    $rExtensions = escapeshellcmd(implode('|', array('srt', 'sub', 'sbv')));
+                    $rExtensions = escapeshellcmd(implode('|', self::SUBTITLE_EXTENSIONS));
                     $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
-                    exec($rCommand, $rSubtitles, $Ee034ad5c6b0c8a3);
+                    exec($rCommand, $rSubtitles);
                 } else {
                     $rSubtitles = array();
                 }
             }
+            $rSubtitlesSet = array_flip($rSubtitles);
             $rThreadData = array();
             foreach ($rFiles as $rFile) {
-                if (time() - filemtime($rFile) >= 30) {
-                    if (in_array(json_encode(array('s:' . SERVER_ID . ':' . $rFile), JSON_UNESCAPED_UNICODE), $rStreamDatabase)) {
-                    } else {
+                if (time() - filemtime($rFile) >= self::FILE_STABLE_SECONDS) {
+                    if (!isset($rStreamDatabaseSet[json_encode(array('s:' . SERVER_ID . ':' . $rFile), JSON_UNESCAPED_UNICODE)])) {
                         $rPathInfo = pathinfo($rFile);
-                        $d8c5b5dc1e354db6 = array();
+                        $rSubtitleData = array();
                         if (isset($rRow['auto_subtitles'])) {
-                            foreach (array('srt', 'sub', 'sbv') as $rExt) {
+                            foreach (self::SUBTITLE_EXTENSIONS as $rExt) {
                                 $rSubtitle = $rPathInfo['dirname'] . '/' . $rPathInfo['filename'] . '.' . $rExt;
-                                if (in_array($rSubtitle, $rSubtitles)) {
-                                    $d8c5b5dc1e354db6 = array('files' => array($rSubtitle), 'names' => array('Subtitles'), 'charset' => array('UTF-8'), 'location' => SERVER_ID);
+                                if (isset($rSubtitlesSet[$rSubtitle])) {
+                                    $rSubtitleData = array('files' => array($rSubtitle), 'names' => array('Subtitles'), 'charset' => array('UTF-8'), 'location' => SERVER_ID);
                                     break;
                                 }
                             }
                         }
-                        $rThreadData[] = array('folder_id' => $rRow['id'], 'type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $d8c5b5dc1e354db6, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval(SettingsManager::getAll()['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => SettingsManager::getAll()['alternative_titles'], 'fallback_parser' => SettingsManager::getAll()['fallback_parser']);
-                        if (0 < $F7fa29461a8a5ee2 && count($rThreadData) == $F7fa29461a8a5ee2) {
+                        $rThreadData[] = array('folder_id' => $rRow['id'], 'type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
+                        if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
                             break;
                         }
                     }

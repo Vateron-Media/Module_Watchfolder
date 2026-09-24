@@ -24,23 +24,29 @@ class WatchService {
 
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
-	public static function editWatchSettings($rData) {
+	/**
+	 * Обновить category_id/bouquets жанра из данных формы настроек (movie- или TV-набор).
+	 *
+	 * @param array $rData Полные данные формы (нужны и bouquet_N / bouquettv_N поля).
+	 * @param string $rGenreKey Префикс ключа жанра ('genre' или 'genretv').
+	 * @param string $rBouquetKey Префикс ключа букетов ('bouquet' или 'bouquettv').
+	 * @param int $rType Тип watch_categories (1 = movie, 2 = series).
+	 */
+	private static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
 		$db = self::db();
 		foreach ($rData as $rKey => $rValue) {
 			$rSplit = explode('_', $rKey);
-			if ($rSplit[0] == 'genre') {
-				$rBouquets = isset($rData['bouquet_' . $rSplit[1]]) ? '[' . implode(',', array_map('intval', $rData['bouquet_' . $rSplit[1]])) . ']' : '[]';
-				$db->query('UPDATE `watch_categories` SET `category_id` = ?, `bouquets` = ? WHERE `genre_id` = ? AND `type` = 1;', $rValue, $rBouquets, $rSplit[1]);
+			if ($rSplit[0] == $rGenreKey) {
+				$rBouquets = isset($rData[$rBouquetKey . '_' . $rSplit[1]]) ? '[' . implode(',', array_map('intval', $rData[$rBouquetKey . '_' . $rSplit[1]])) . ']' : '[]';
+				$db->query('UPDATE `watch_categories` SET `category_id` = ?, `bouquets` = ? WHERE `genre_id` = ? AND `type` = ?;', $rValue, $rBouquets, $rSplit[1], $rType);
 			}
 		}
+	}
 
-		foreach ($rData as $rKey => $rValue) {
-			$rSplit = explode('_', $rKey);
-			if ($rSplit[0] == 'genretv') {
-				$rBouquets = isset($rData['bouquettv_' . $rSplit[1]]) ? '[' . implode(',', array_map('intval', $rData['bouquettv_' . $rSplit[1]])) . ']' : '[]';
-				$db->query('UPDATE `watch_categories` SET `category_id` = ?, `bouquets` = ? WHERE `genre_id` = ? AND `type` = 2;', $rValue, $rBouquets, $rSplit[1]);
-			}
-		}
+	public static function editWatchSettings($rData) {
+		$db = self::db();
+		self::applyGenreCategoryUpdates($rData, 'genre', 'bouquet', 1);
+		self::applyGenreCategoryUpdates($rData, 'genretv', 'bouquettv', 2);
 
 		$altTitles = isset($rData['alternative_titles']);
 		$fallbackParser = isset($rData['fallback_parser']);
@@ -186,6 +192,20 @@ class WatchService {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Вставить жанр в watch_categories для данного type, если его там ещё нет.
+	 *
+	 * @param int $rGenreID TMDb genre id.
+	 * @param string $rGenreName TMDb genre name.
+	 * @param int $rType watch_categories type (1 = movie, 2 = series).
+	 * @param array $rCurrentCats [type => [genre_id, ...]] — уже существующие жанры.
+	 */
+	private static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
+		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
+			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
+		}
+	}
+
 	public static function updateCategories() {
 		$db = self::db();
 		$rTMDB = TmdbApiService::createClient(SettingsManager::getAll()['tmdb_api_key']);
@@ -208,25 +228,15 @@ class WatchService {
 		$rMovieGenres = $rTMDB->getMovieGenres();
 
 		foreach ($rMovieGenres as $rMovieGenre) {
-			if (!in_array($rMovieGenre->getID(), $rCurrentCats[1])) {
-				$db->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(1, ?, ?, 0, '[]');", $rMovieGenre->getID(), $rMovieGenre->getName());
-			}
-
-			if (!in_array($rMovieGenre->getID(), $rCurrentCats[2])) {
-				$db->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(2, ?, ?, 0, '[]');", $rMovieGenre->getID(), $rMovieGenre->getName());
-			}
+			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 1, $rCurrentCats);
+			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 2, $rCurrentCats);
 		}
 
 		$rTVGenres = $rTMDB->getTVGenres();
 
 		foreach ($rTVGenres as $rTVGenre) {
-			if (!in_array($rTVGenre->getID(), $rCurrentCats[1])) {
-				$db->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(1, ?, ?, 0, '[]');", $rTVGenre->getID(), $rTVGenre->getName());
-			}
-
-			if (!in_array($rTVGenre->getID(), $rCurrentCats[2])) {
-				$db->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(2, ?, ?, 0, '[]');", $rTVGenre->getID(), $rTVGenre->getName());
-			}
+			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 1, $rCurrentCats);
+			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 2, $rCurrentCats);
 		}
 	}
 
