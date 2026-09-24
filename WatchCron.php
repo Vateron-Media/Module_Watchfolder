@@ -29,13 +29,13 @@ use XcVm\Domain\Stream\StreamRepository;
 class WatchCron {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
-    /** Расширения, сканируемые по умолчанию, если в папке не заданы свои. */
+    /** Extensions scanned by default when a folder has none configured. */
     private const DEFAULT_WATCH_EXTENSIONS = array('mp4', 'mkv', 'avi', 'mpg', 'flv', '3gp', 'm4v', 'flv', 'wmv', 'mov', 'ts');
 
-    /** Расширения субтитров, которые auto_subtitles ищет рядом с медиафайлом. */
+    /** Subtitle extensions auto_subtitles looks for next to a media file. */
     private const SUBTITLE_EXTENSIONS = array('srt', 'sub', 'sbv');
 
-    /** Файл считается "дозаписанным" и готовым к обработке через N секунд после последнего изменения. */
+    /** A file counts as "done writing" and ready to process N seconds after its last change. */
     private const FILE_STABLE_SECONDS = 30;
 
 
@@ -160,7 +160,7 @@ class WatchCron {
         $db = self::db();
         global $rThreadCount;
         global $rScanOffset;
-        global $F7fa29461a8a5ee2; // max_items — задаётся во внешнем bootstrap'е, имя менять нельзя
+        global $F7fa29461a8a5ee2; // max_items — set by an external bootstrap; do not rename
         $rMaxFilesPerRun = $F7fa29461a8a5ee2;
         $rSettings = SettingsManager::getAll();
         $rWatchCategories = array(1 => self::getWatchCategories(1), 2 => self::getWatchCategories(2));

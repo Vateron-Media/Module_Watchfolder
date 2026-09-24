@@ -13,11 +13,11 @@ use XcVm\Infrastructure\Database\DatabaseFactory;
 /**
  * Watch Module Controller
  *
- * Обрабатывает все маршруты модуля Watch:
- * - Список Watch Folder'ов (index)
- * - Добавление/редактирование (add)
- * - Настройки Watch (settings)
- * - Логи Watch (output)
+ * Handles all routes of the Watch module:
+ * - Watch Folder list (index)
+ * - Add/edit (add)
+ * - Watch settings (settings)
+ * - Watch logs (output)
  * - API: enable/disable/kill/folder actions
  *
  * @see WatchService
@@ -33,12 +33,12 @@ use XcVm\Infrastructure\Database\DatabaseFactory;
 class WatchController {
 
     /**
-     * Путь к директории views модуля
+     * Path to the module's views directory
      * @var string
      */
     protected $viewsPath;
 
-    /** @var string Путь к layout-файлам */
+    /** @var string Path to the layout files */
     protected $layoutsPath;
 
     public function __construct() {
@@ -49,7 +49,7 @@ class WatchController {
     }
 
     // ───────────────────────────────────────────────────────────
-    //  Страницы (GET)
+    //  Pages (GET)
     // ───────────────────────────────────────────────────────────
 
     public function index() {
@@ -104,7 +104,7 @@ class WatchController {
     }
 
     // ───────────────────────────────────────────────────────────
-    //  API-действия (JSON)
+    //  API actions (JSON)
     // ───────────────────────────────────────────────────────────
 
     public function apiEnable() {

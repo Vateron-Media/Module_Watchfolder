@@ -25,12 +25,12 @@ class WatchService {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
 	/**
-	 * Обновить category_id/bouquets жанра из данных формы настроек (movie- или TV-набор).
+	 * Update a genre's category_id/bouquets from the watch settings form data (movie or TV set).
 	 *
-	 * @param array $rData Полные данные формы (нужны и bouquet_N / bouquettv_N поля).
-	 * @param string $rGenreKey Префикс ключа жанра ('genre' или 'genretv').
-	 * @param string $rBouquetKey Префикс ключа букетов ('bouquet' или 'bouquettv').
-	 * @param int $rType Тип watch_categories (1 = movie, 2 = series).
+	 * @param array $rData Full form data (also needs the bouquet_N / bouquettv_N fields).
+	 * @param string $rGenreKey Genre key prefix ('genre' or 'genretv').
+	 * @param string $rBouquetKey Bouquets key prefix ('bouquet' or 'bouquettv').
+	 * @param int $rType watch_categories type (1 = movie, 2 = series).
 	 */
 	public static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
 		$db = self::db();
@@ -183,6 +183,20 @@ class WatchService {
 	}
 
 	/**
+	 * Insert a genre into watch_categories for the given type, if it isn't there yet.
+	 *
+	 * @param int $rGenreID TMDb genre id.
+	 * @param string $rGenreName TMDb genre name.
+	 * @param int $rType watch_categories type (1 = movie, 2 = series).
+	 * @param array $rCurrentCats [type => [genre_id, ...]] — genres already present.
+	 */
+	public static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
+		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
+			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
+		}
+	}
+
+	/**
 	 * Sync TMDb movie/TV genres into the watch_categories table (types 1 & 2).
 	 *
 	 * Lives in the watch module because watch owns the watch_categories table
@@ -192,19 +206,6 @@ class WatchService {
 	 *
 	 * @return void
 	 */
-	/**
-	 * Вставить жанр в watch_categories для данного type, если его там ещё нет.
-	 *
-	 * @param int $rGenreID TMDb genre id.
-	 * @param string $rGenreName TMDb genre name.
-	 * @param int $rType watch_categories type (1 = movie, 2 = series).
-	 * @param array $rCurrentCats [type => [genre_id, ...]] — уже существующие жанры.
-	 */
-	public static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
-		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
-			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
-		}
-	}
 
 	public static function updateCategories() {
 		$db = self::db();

@@ -10,7 +10,7 @@ use XcVm\Domain\Stream\StreamProcess;
 use XcVm\Streaming\Codec\FfmpegPaths;
 
 /**
- * WatchItem — модуль обработки отдельного элемента Watch Folder (фильм/сериал).
+ * WatchItem — processes a single Watch Folder item (movie/series).
  *
  * @package XC_VM_Module_Watch
  * @author  Divarion_D <https://github.com/Divarion-D>
@@ -22,11 +22,11 @@ use XcVm\Streaming\Codec\FfmpegPaths;
 class WatchItem {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
-    /** Как долго доверять series_*.data кэшу перед перечитыванием из БД. */
+    /** How long to trust the series_*.data cache before re-reading from the DB. */
     private const SERIES_CACHE_TTL_SECONDS = 360;
 
     /**
-     * Добавить элемент в букет (через БД при импорте, иначе — файлом для checkBouquets()).
+     * Add an item to a bouquet (via the DB when importing, otherwise as a file for checkBouquets()).
      *
      * @param string $rType
      * @param int $rBouquetID
@@ -43,7 +43,7 @@ class WatchItem {
     }
 
     /**
-     * Распарсить имя релиза (guessit / ptn).
+     * Parse a release name (guessit / ptn).
      *
      * @param string $rRelease
      * @param string $rType
@@ -59,15 +59,17 @@ class WatchItem {
         if (!is_array($rResult)) {
             $rResult = array();
         }
-        // Явный шаблон "S01 E01" / "S01E01": парсеры (особенно PTN) ломаются на
-        // числовых названиях вроде "9-1-1" — берут цифру названия как сезон и
-        // выдают мусорный title. Если в исходной строке есть явный SxxExx,
-        // надёжно извлекаем сезон/эпизод/название регуляркой и переопределяем.
+        // Explicit "S01 E01" / "S01E01" pattern: parsers (PTN especially) break
+        // on numeric titles like "9-1-1" — they take a digit from the title as
+        // the season and produce a garbage title. If the source string has an
+        // explicit SxxExx, reliably extract season/episode/title via regex and
+        // override.
         if (preg_match('/^(.+?)[\s._-]+[Ss](\d{1,3})[\s._-]*[Ee](\d{1,4})/', $rRelease, $rMatch)) {
             $rCleanTitle = trim(preg_replace('/\s+/', ' ', preg_replace('/[._]+/', ' ', $rMatch[1])));
-            // Убираем год в конце названия ("Boston Blue (2025)" → "Boston Blue") —
-            // он ломает поиск в TMDB. Год сохраняем отдельно для поиска. Защита:
-            // не трогаем, если год — это всё название (например сериал "1923").
+            // Strip a trailing year from the title ("Boston Blue (2025)" →
+            // "Boston Blue") — it breaks the TMDB search. The year is kept
+            // separately for the search. Guard: don't touch it if the year is
+            // the whole title (e.g. the series "1923").
             if (preg_match('/^(.*?)[\s._-]*\(?((?:19|20)\d{2})\)?$/', $rCleanTitle, $rYearMatch) && trim($rYearMatch[1]) !== '') {
                 $rResult['year'] = intval($rYearMatch[2]);
                 $rCleanTitle = trim($rYearMatch[1]);
@@ -82,7 +84,7 @@ class WatchItem {
     }
 
     /**
-     * Получить фильм из кэша по TMDB ID.
+     * Get a movie from the cache by TMDB ID.
      *
      * @param int $rTMDBID
      * @return array|null
@@ -94,7 +96,7 @@ class WatchItem {
     }
 
     /**
-     * Получить эпизод из кэша по TMDB ID, сезону и номеру.
+     * Get an episode from the cache by TMDB ID, season and number.
      *
      * @param int $rTMDBID
      * @param int $rSeason
@@ -111,25 +113,26 @@ class WatchItem {
     }
 
     /**
-     * Нормализовать заголовок для сравнения.
+     * Normalize a title for comparison.
      *
      * @param string $rTitle
      * @return string
      */
     public static function parseTitle($rTitle) {
-        // Нормализуем разделители: дефис, подчёркивание И точку → пробел, чтобы
-        // названия вроде "9-1-1" и аббревиатуры вроде "S.W.A.T." совпадали
-        // независимо от того, как их выдал парсер: парсеры отдают "S W A T", а
-        // TMDb — "S.W.A.T.". Без нормализации точки такие тайтлы давали ~53% и
-        // отсеивались по порогу. Точка убрана и из keep-набора регэкспа ниже.
-        // Сравнение симметрично для обеих сторон — существующие совпадения не ломает.
+        // Normalize separators: dash, underscore AND dot → space, so titles
+        // like "9-1-1" and abbreviations like "S.W.A.T." match regardless of
+        // how the parser rendered them: parsers give "S W A T", while TMDb
+        // gives "S.W.A.T.". Without dot normalization such titles scored
+        // ~53% and got filtered out by the threshold. The dot is also
+        // removed from the keep-set of the regex below. The comparison is
+        // symmetric on both sides — it doesn't break existing matches.
         $rTitle = str_replace(array('-', '_', '.'), ' ', $rTitle);
         $rTitle = strtolower(preg_replace("/(?![=\$'€%-])\\p{P}/u", '', $rTitle));
         return trim(preg_replace('/\\s+/u', ' ', $rTitle));
     }
 
     /**
-     * Проверить источник через ffprobe.
+     * Probe the source via ffprobe.
      *
      * @param string $rFilename
      * @return array|null
@@ -140,7 +143,7 @@ class WatchItem {
     }
 
     /**
-     * Получить сериал по TMDB ID.
+     * Get a series by TMDB ID.
      *
      * @param int $rID
      * @return array|null
@@ -159,7 +162,7 @@ class WatchItem {
     }
 
     /**
-     * Получить URL трейлера сериала с TMDB.
+     * Get a series' trailer URL from TMDB.
      *
      * @param int $rTMDBID
      * @param string|null $rLanguage
@@ -184,7 +187,7 @@ class WatchItem {
     }
 
     /**
-     * Получить сериал по ID.
+     * Get a series by ID.
      *
      * @param int $rID
      * @return array|null
@@ -198,7 +201,7 @@ class WatchItem {
     }
 
     /**
-     * Получить следующий порядковый номер для streams.
+     * Get the next order number for streams.
      *
      * @return int
      */
@@ -212,7 +215,7 @@ class WatchItem {
     }
 
     /**
-     * Записать результат обработки файла в watch_logs (дублировался ~10 раз в run()).
+     * Log a file's processing outcome to watch_logs (was duplicated ~10 times in run()).
      *
      * @param int $rThreadType
      * @param string $rFile
@@ -224,9 +227,10 @@ class WatchItem {
     }
 
     /**
-     * Общая логика "апгрейда на месте": если новый файл не лучше уже импортированного — не трогаем.
-     * Иначе обновляет streams/streams_servers, логирует и передаёт управление $rWriteCache
-     * для типоспецифичной перезаписи кэша (movie_*.cache / series_*.cache), затем всегда завершает процесс.
+     * Shared "upgrade in place" logic: if the new file isn't better than the already
+     * imported one, leave it alone. Otherwise updates streams/streams_servers, logs the
+     * outcome and hands control to $rWriteCache for the type-specific cache rewrite
+     * (movie_*.cache / series_*.cache), then always throws WatchItemHalt to stop processing.
      *
      * @param array $rUpgradeData
      * @param array $rThreadData
@@ -264,7 +268,7 @@ class WatchItem {
     }
 
     /**
-     * Топ-N имён из cast/crew TMDB (дублировался для movie и series).
+     * Top-N names from TMDB cast/crew (was duplicated for movie and series).
      *
      * @param array $rCredits
      * @param int $rLimit
@@ -282,7 +286,7 @@ class WatchItem {
     }
 
     /**
-     * Топ-N режиссёров (department/known_for_department == Directing) из crew TMDB.
+     * Top-N directors (department/known_for_department == Directing) from TMDB crew.
      *
      * @param array $rCredits
      * @param int $rLimit
@@ -302,8 +306,8 @@ class WatchItem {
     }
 
     /**
-     * Топ-N названий жанров TMDB (лимит передаётся как есть, чтобы сохранить
-     * существующее поведение movie (фиксировано 3) и series (настройка max_genres)).
+     * Top-N TMDB genre names (the limit is passed through as-is to preserve
+     * the existing movie behavior (fixed at 3) vs. series (max_genres setting)).
      *
      * @param array $rGenres
      * @param int $rLimit
@@ -321,10 +325,10 @@ class WatchItem {
     }
 
     /**
-     * Дополнить $rCategoryIDs категориями, сопоставленными жанрам TMDB через watch_categories.
+     * Add to $rCategoryIDs the categories mapped from TMDB genres via watch_categories.
      *
      * @param array $rGenres
-     * @param array $rWatchCategoryMap watch_categories для нужного type, keyed by genre_id
+     * @param array $rWatchCategoryMap watch_categories for the relevant type, keyed by genre_id
      * @param int $rMaxGenres
      * @param array $rCategoryIDs
      * @return array
@@ -342,10 +346,10 @@ class WatchItem {
     }
 
     /**
-     * Дополнить $rBouquetIDs букетами, сопоставленными жанрам TMDB через watch_categories.
+     * Add to $rBouquetIDs the bouquets mapped from TMDB genres via watch_categories.
      *
      * @param array $rGenres
-     * @param array $rWatchCategoryMap watch_categories для нужного type, keyed by genre_id
+     * @param array $rWatchCategoryMap watch_categories for the relevant type, keyed by genre_id
      * @param int $rMaxGenres
      * @param array $rBouquetIDs
      * @return array
@@ -365,9 +369,9 @@ class WatchItem {
     }
 
     /**
-     * Общие поля $rImportArray, выставляемые во всех трёх ветках run() (movie-match,
-     * series-match, no-match). $rSetEnableTranscode=false сохраняет существующее
-     * поведение series-match, где enable_transcode исторически не выставлялся.
+     * Common $rImportArray fields set in all three run() branches (movie-match,
+     * series-match, no-match). $rSetEnableTranscode=false preserves the existing
+     * series-match behavior, where enable_transcode has historically never been set.
      *
      * @param array $rImportArray
      * @param array $rThreadData
@@ -389,21 +393,21 @@ class WatchItem {
     }
 
     /**
-     * Найти лучшее совпадение в TMDB для распарсенного названия/альт-названия.
+     * Find the best TMDB match for a parsed title/alt title.
      *
-     * Ищет по названию (и повторно без года, если с годом ничего не нашлось),
-     * а затем выбирает кандидата с максимальным процентом схожести названия
-     * (точное совпадение альт-названия или основного названия даёт мгновенные 100%).
-     * Если ничего не подошло по прямому сравнению, но включены alternative_titles
-     * и год совпадает, дополнительно проверяет альтернативные названия с TMDB.
+     * Searches by title (and retries without the year if nothing was found with
+     * it), then picks the candidate with the highest title similarity percentage
+     * (an exact alt-title or main-title match scores an instant 100%). If nothing
+     * matched by direct comparison but alternative_titles is enabled and the year
+     * matches, additionally checks TMDB's alternative titles.
      *
-     * @param object $rTMDB Клиент TMDB (searchMovie/searchTVShow/getMovieTitles/getSeriesTitles).
+     * @param object $rTMDB TMDB client (searchMovie/searchTVShow/getMovieTitles/getSeriesTitles).
      * @param array $rThreadData
      * @param array $rSettings
      * @param string $rTitle
      * @param string|null $rAltTitle
      * @param int|null $rYear
-     * @return object|null Объект Movie/TVShow с максимальным процентом схожести, либо null.
+     * @return object|null The Movie/TVShow object with the highest similarity percentage, or null.
      */
     public static function findBestTmdbMatch($rTMDB, array $rThreadData, array $rSettings, $rTitle, $rAltTitle, $rYear) {
         $rMatches = array();
@@ -524,18 +528,19 @@ class WatchItem {
     }
 
     /**
-     * Собрать $rImportArray для фильма при найденном TMDB-совпадении: проверяет
-     * апгрейд уже импортированной копии (может завершить процесс через
-     * applyUpgrade()), затем заполняет movie_properties/cast/genres/категории.
+     * Build $rImportArray for a movie once a TMDB match was found: checks whether
+     * an already-imported copy should be upgraded (may stop processing via
+     * applyUpgrade(), which throws WatchItemHalt), then fills in
+     * movie_properties/cast/genres/categories.
      *
      * @param object $rTMDB
-     * @param object $rMatch Найденный TMDB Movie.
+     * @param object $rMatch The matched TMDB Movie.
      * @param array $rThreadData
      * @param array $rSettings
-     * @param array $rWatchCategories watch_categories для обоих типов, keyed by type.
+     * @param array $rWatchCategories watch_categories for both types, keyed by type.
      * @param string $rFile
      * @param int $rThreadType
-     * @param array $rImportArray Текущий (частично заполненный) массив для INSERT в streams.
+     * @param array $rImportArray The current (partially filled) array for the INSERT into streams.
      * @param array $rCategoryIDs
      * @param array $rBouquetIDs
      * @param string|null $rLanguage
@@ -589,26 +594,26 @@ class WatchItem {
     }
 
     /**
-     * Собрать $rImportArray для эпизода при найденном TMDB-совпадении сериала:
-     * проверяет апгрейд уже импортированного эпизода (может завершить процесс
-     * через applyUpgrade()), создаёт/обновляет запись сериала под файловым
-     * локом (один процесс на TMDB show id одновременно), затем заполняет
-     * название эпизода/movie_properties. Может завершить процесс через
-     * exit(), если для нового сериала не удалось разрешить ни одной категории
-     * (лок в этом случае освобождается перед exit()).
+     * Build $rImportArray for an episode once a TMDB series match was found: checks
+     * whether an already-imported episode should be upgraded (may stop processing
+     * via applyUpgrade(), which throws WatchItemHalt), creates/updates the series
+     * record under a file lock (one process per TMDB show id at a time), then fills
+     * in the episode title/movie_properties. May also stop processing by throwing
+     * WatchItemHalt if no category could be resolved for a brand-new series (the
+     * lock is released before that throw).
      *
      * @param object $rTMDB
-     * @param object $rMatch Найденный TMDB TVShow.
-     * @param array|null $rRelease Результат parserelease() для текущего файла.
+     * @param object $rMatch The matched TMDB TVShow.
+     * @param array|null $rRelease The parserelease() result for the current file.
      * @param array $rThreadData
      * @param array $rSettings
-     * @param array $rWatchCategories watch_categories для обоих типов, keyed by type.
+     * @param array $rWatchCategories watch_categories for both types, keyed by type.
      * @param string $rFile
      * @param int $rThreadType
-     * @param int $rTimeout Таймаут ожидания чужого лока на этот сериал (сек).
+     * @param int $rTimeout How long to wait for another process's lock on this series (seconds).
      * @param int|null $rReleaseSeason
      * @param int|null $rReleaseEpisode
-     * @param array $rImportArray Текущий (частично заполненный) массив для INSERT в streams.
+     * @param array $rImportArray The current (partially filled) array for the INSERT into streams.
      * @param array $rCategoryIDs
      * @param array $rBouquetIDs
      * @param string|null $rLanguage
@@ -765,18 +770,17 @@ class WatchItem {
     }
 
     /**
-     * Разрешить fallback-категорию/букеты (когда genre-резолвинг ничего не
-     * дал) и записать итоговую строку в `streams` (+ streams_servers,
-     * bouquets/streams_episodes, auto_encode, watch_logs). Всегда завершает
-     * процесс через exit() — как и раньше, здесь нет пути "вернуться в run()"
-     * после этого вызова, поэтому метод не покрыт unit-тестами (аналогично
-     * applyUpgrade()).
+     * Resolve fallback category/bouquets (when genre resolution came up empty) and
+     * write the final row into `streams` (+ streams_servers, bouquets/streams_episodes,
+     * auto_encode, watch_logs). Always throws WatchItemHalt on every path, once the
+     * outcome has already been logged via logWatchResult() — there's no "return to
+     * run()" path after this call, same as applyUpgrade().
      *
      * @param array $rThreadData
      * @param int $rThreadType
      * @param string $rFile
-     * @param object|null $rMatch Найденное TMDB-совпадение (для movie-кэша), либо null.
-     * @param array|null $rSeries Запись сериала (для series_no/streams_episodes), либо null.
+     * @param object|null $rMatch The matched TMDB result (for the movie cache), or null.
+     * @param array|null $rSeries The series record (for series_no/streams_episodes), or null.
      * @param int|null $rReleaseSeason
      * @param int|null $rReleaseEpisode
      * @param array $rImportArray

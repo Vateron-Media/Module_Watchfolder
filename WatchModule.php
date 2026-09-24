@@ -20,32 +20,32 @@ use XcVm\Core\Module\TopbarRegistry;
 /**
  * Watch Module
  *
- * Модуль Watch Folder / Recording.
- * Регистрирует сервисы, маршруты, API-действия и крон-задачи.
+ * Watch Folder / Recording module.
+ * Registers services, routes, API actions and cron jobs.
  *
  * ──────────────────────────────────────────────────────────────────
- * Что включает:
+ * What it includes:
  * ──────────────────────────────────────────────────────────────────
  *
- *   Сервисы:
- *     - WatchService    — CRUD Watch Folder'ов, настройки, enable/disable/kill
- *     - RecordingService — планирование записей (DVR)
+ *   Services:
+ *     - WatchService    — Watch Folder CRUD, settings, enable/disable/kill
+ *     - RecordingService — recording (DVR) scheduling
  *
- *   Контроллер:
- *     - WatchController — обработка HTTP-запросов и API
+ *   Controller:
+ *     - WatchController — HTTP request and API handling
  *
- *   Страницы:
- *     - watch          — список folder'ов
- *     - watch/add      — добавление/редактирование
- *     - watch/settings — настройки watch (settings_watch)
- *     - watch/output   — логи (watch_output)
- *     - watch/record   — планирование записи (record)
+ *   Pages:
+ *     - watch          — folder list
+ *     - watch/add      — add/edit
+ *     - watch/settings — watch settings (settings_watch)
+ *     - watch/output   — logs (watch_output)
+ *     - watch/record   — recording schedule (record)
  *
- *   API-действия:
- *     - enable_watch   — включить все folder'ы
- *     - disable_watch  — отключить все folder'ы
- *     - kill_watch     — убить процессы
- *     - folder         — удалить/запустить folder
+ *   API actions:
+ *     - enable_watch   — enable all folders
+ *     - disable_watch  — disable all folders
+ *     - kill_watch     — kill processes
+ *     - folder         — delete/run a folder
  *
  * @see WatchService
  * @see RecordingService
