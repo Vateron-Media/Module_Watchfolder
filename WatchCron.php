@@ -126,7 +126,7 @@ class WatchCron {
      */
     public static function cleanupMissing($rFolderRow, $rExistingFiles) {
         $db = self::db();
-        $rTypeMap = array('movie' => 2, 'series' => 3);
+        $rTypeMap = array('movie' => 2, 'series' => 5);
         $rType = $rTypeMap[$rFolderRow['type']] ?? 0;
         if (!$rType) return;
         $rExistingLookup = array_flip($rExistingFiles);

@@ -545,7 +545,7 @@ class WatchItem {
                                     }
                                 }
                             }
-                            if (!($rThreadData['type'] == 'series' && (!$rReleaseSeason || !$rReleaseEpisode))) {
+                            if (!($rThreadData['type'] == 'series' && ($rReleaseSeason === null || $rReleaseEpisode === null))) {
                                 if (!$rTitle) {
                                     $rTitle = $rFilename;
                                 }
@@ -594,10 +594,6 @@ class WatchItem {
                                                 }
                                             }
 
-                                            $rPercentageAlt = 0;
-                                            if ($rAltTitle) {
-                                                similar_text(self::parseTitle($rAltTitle), self::parseTitle(($rResultArr->get('title') ?: $rResultArr->get('name'))), $rPercentageAlt);
-                                            }
                                             $rReleaseDate = (string) ($rResultArr->get('release_date') ?: $rResultArr->get('first_air_date'));
                                             $rReleaseYear = intval(substr($rReleaseDate, 0, 4));
                                             if ($rSettings['percentage_match'] <= $rPercentage || $rSettings['percentage_match'] <= $rPercentageAlt) {
@@ -838,6 +834,8 @@ class WatchItem {
                                             $rSeries = null;
                                         }
                                     } else {
+                                        flock($rFileLock, LOCK_UN);
+                                        unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
                                         self::logWatchResult($rThreadType, $rFile, 3);
                                         exit();
                                     }
@@ -850,7 +848,7 @@ class WatchItem {
                                 flock($rFileLock, LOCK_UN);
                                 unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
                                 self::applyCommonStreamSettings($rImportArray, $rThreadData, false);
-                                if ($rReleaseSeason && $rReleaseEpisode) {
+                                if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
                                     if (is_array($rRelease['episode']) && count($rRelease['episode']) == 2) {
                                         $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rRelease['episode'][0]) . '-' . sprintf('%02d', $rRelease['episode'][1]);
                                     } else {
@@ -889,7 +887,7 @@ class WatchItem {
                                 $rImportArray['year'] = $rYear;
                             }
                         } else {
-                            if ($rReleaseSeason && $rReleaseEpisode) {
+                            if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
                                 $rImportArray['stream_display_name'] = $rTitle . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode) . ' - ';
                             }
                         }
