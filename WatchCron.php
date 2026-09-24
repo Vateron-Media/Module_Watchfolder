@@ -21,9 +21,6 @@ use XcVm\Domain\Stream\StreamRepository;
  * @license AGPL-3.0 https://www.gnu.org/licenses/agpl-3.0.html
  */
 
-require_once __DIR__ . '/../../Core/Process/Thread.php';
-require_once __DIR__ . '/../../Core/Process/Multithread.php';
-
 /**
  * Class WatchCron
  *

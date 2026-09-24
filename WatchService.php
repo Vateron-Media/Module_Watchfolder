@@ -8,7 +8,7 @@ use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
 use XcVm\Domain\Stream\StreamRepository;
-use XcVm\Module\Tmdb\TmdbApiService;
+use XcVm\Infrastructure\Tmdb\TmdbApiService;
 
 /**
  * WatchService — watch service
@@ -32,7 +32,7 @@ class WatchService {
 	 * @param string $rBouquetKey Префикс ключа букетов ('bouquet' или 'bouquettv').
 	 * @param int $rType Тип watch_categories (1 = movie, 2 = series).
 	 */
-	private static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
+	public static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
 		$db = self::db();
 		foreach ($rData as $rKey => $rValue) {
 			$rSplit = explode('_', $rKey);
@@ -200,7 +200,7 @@ class WatchService {
 	 * @param int $rType watch_categories type (1 = movie, 2 = series).
 	 * @param array $rCurrentCats [type => [genre_id, ...]] — уже существующие жанры.
 	 */
-	private static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
+	public static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
 		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
 			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
 		}
