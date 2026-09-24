@@ -523,6 +523,335 @@ class WatchItem {
         return null;
     }
 
+    /**
+     * Собрать $rImportArray для фильма при найденном TMDB-совпадении: проверяет
+     * апгрейд уже импортированной копии (может завершить процесс через
+     * applyUpgrade()), затем заполняет movie_properties/cast/genres/категории.
+     *
+     * @param object $rTMDB
+     * @param object $rMatch Найденный TMDB Movie.
+     * @param array $rThreadData
+     * @param array $rSettings
+     * @param array $rWatchCategories watch_categories для обоих типов, keyed by type.
+     * @param string $rFile
+     * @param int $rThreadType
+     * @param array $rImportArray Текущий (частично заполненный) массив для INSERT в streams.
+     * @param array $rCategoryIDs
+     * @param array $rBouquetIDs
+     * @param string|null $rLanguage
+     * @return array ['importArray' => array, 'categoryIDs' => array, 'bouquetIDs' => array]
+     */
+    public static function buildMovieImportArray($rTMDB, $rMatch, array $rThreadData, array $rSettings, array $rWatchCategories, $rFile, $rThreadType, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs, $rLanguage) {
+        if ($rThreadData['duplicate_tmdb']) {
+            $rUpgradeData = null;
+        } else {
+            $rUpgradeData = self::getMovie($rMatch->get('id'));
+        }
+
+        if ($rUpgradeData) {
+            self::applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, 'movie', function ($rUpgradeData) use ($rMatch, $rFile) {
+                file_put_contents(WATCH_TMP_PATH . 'movie_' . $rMatch->get('id') . '.cache', json_encode(array('id' => $rUpgradeData['id'], 'source' => 's:' . SERVER_ID . ':' . $rFile)));
+            });
+        }
+        $rMovie = $rTMDB->getMovie($rMatch->get('id'));
+        $rMovieData = json_decode($rMovie->getJSON(), true);
+        $rMovieData['trailer'] = $rMovie->getTrailer();
+        $rThumb = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rMovieData['poster_path'];
+        $rBG = 'https://image.tmdb.org/t/p/w1280' . $rMovieData['backdrop_path'];
+        if ($rSettings['download_images']) {
+            $rThumb = ImageUtils::downloadImage($rThumb);
+            $rBG = ImageUtils::downloadImage($rBG);
+        }
+        $rCast = self::extractTopCast($rMovieData['credits']);
+        $rDirectors = self::extractTopDirectors($rMovieData['credits']);
+        $rCountry = '';
+        if (isset($rMovieData['production_countries'][0]['name'])) {
+            $rCountry = $rMovieData['production_countries'][0]['name'];
+        }
+        $rGenres = self::extractTopGenreNames($rMovieData['genres'], 3);
+        $rSeconds = intval($rMovieData['runtime']) * 60;
+        $rImportArray['stream_display_name'] = $rMovieData['title'];
+        if (strlen($rMovieData['release_date']) > 0) {
+            $rImportArray['year'] = intval(substr($rMovieData['release_date'], 0, 4));
+        }
+        $rImportArray['tmdb_id'] = ($rMovieData['id'] ?: null);
+        $rImportArray['movie_properties'] = array('kinopoisk_url' => 'https://www.themoviedb.org/movie/' . $rMovieData['id'], 'tmdb_id' => $rMovieData['id'], 'name' => $rMovieData['title'], 'o_name' => $rMovieData['original_title'], 'cover_big' => $rThumb, 'movie_image' => $rThumb, 'release_date' => $rMovieData['release_date'], 'episode_run_time' => $rMovieData['runtime'], 'youtube_trailer' => $rMovieData['trailer'], 'director' => implode(', ', $rDirectors), 'actors' => implode(', ', $rCast), 'cast' => implode(', ', $rCast), 'description' => $rMovieData['overview'], 'plot' => $rMovieData['overview'], 'age' => '', 'mpaa_rating' => '', 'rating_count_kinopoisk' => 0, 'country' => $rCountry, 'genre' => implode(', ', $rGenres), 'backdrop_path' => array($rBG), 'duration_secs' => $rSeconds, 'duration' => sprintf('%02d:%02d:%02d', $rSeconds / 3600, ($rSeconds / 60) % 60, $rSeconds % 60), 'video' => array(), 'audio' => array(), 'bitrate' => 0, 'rating' => $rMovieData['vote_average']);
+        $rImportArray['rating'] = ($rImportArray['movie_properties']['rating'] ?: 0);
+        self::applyCommonStreamSettings($rImportArray, $rThreadData);
+        $rImportArray['tmdb_language'] = $rLanguage;
+        if (count($rCategoryIDs) == 0 && !empty($rMovieData['genres']) && is_array($rMovieData['genres'])) {
+            $rCategoryIDs = self::resolveGenreCategoryIDs($rMovieData['genres'], $rWatchCategories[1], $rThreadData['max_genres'], $rCategoryIDs);
+        }
+        if (count($rBouquetIDs) == 0) {
+            $rBouquetIDs = self::resolveGenreBouquetIDs($rMovieData['genres'] ?? [], $rWatchCategories[1], $rThreadData['max_genres'], $rBouquetIDs);
+        }
+        return array('importArray' => $rImportArray, 'categoryIDs' => $rCategoryIDs, 'bouquetIDs' => $rBouquetIDs);
+    }
+
+    /**
+     * Собрать $rImportArray для эпизода при найденном TMDB-совпадении сериала:
+     * проверяет апгрейд уже импортированного эпизода (может завершить процесс
+     * через applyUpgrade()), создаёт/обновляет запись сериала под файловым
+     * локом (один процесс на TMDB show id одновременно), затем заполняет
+     * название эпизода/movie_properties. Может завершить процесс через
+     * exit(), если для нового сериала не удалось разрешить ни одной категории
+     * (лок в этом случае освобождается перед exit()).
+     *
+     * @param object $rTMDB
+     * @param object $rMatch Найденный TMDB TVShow.
+     * @param array|null $rRelease Результат parserelease() для текущего файла.
+     * @param array $rThreadData
+     * @param array $rSettings
+     * @param array $rWatchCategories watch_categories для обоих типов, keyed by type.
+     * @param string $rFile
+     * @param int $rThreadType
+     * @param int $rTimeout Таймаут ожидания чужого лока на этот сериал (сек).
+     * @param int|null $rReleaseSeason
+     * @param int|null $rReleaseEpisode
+     * @param array $rImportArray Текущий (частично заполненный) массив для INSERT в streams.
+     * @param array $rCategoryIDs
+     * @param array $rBouquetIDs
+     * @param string|null $rLanguage
+     * @return array ['importArray' => array, 'categoryIDs' => array, 'bouquetIDs' => array, 'series' => array|null]
+     */
+    public static function buildSeriesImportArray($rTMDB, $rMatch, $rRelease, array $rThreadData, array $rSettings, array $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs, $rLanguage) {
+        $rShow = $rTMDB->getTVShow($rMatch->get('id'));
+        if ($rThreadData['duplicate_tmdb']) {
+            $rUpgradeData = null;
+        } else {
+            $rUpgradeData = self::getEpisode($rMatch->get('id'), $rReleaseSeason, $rReleaseEpisode);
+        }
+        if ($rUpgradeData) {
+            self::applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, 'episode', function ($rUpgradeData) use ($rMatch, $rReleaseSeason, $rReleaseEpisode, $rFile) {
+                $rCacheData = json_decode(file_get_contents(WATCH_TMP_PATH . 'series_' . $rMatch->get('id') . '.cache'), true);
+                $rCacheData[$rReleaseSeason . '_' . $rReleaseEpisode] = array('id' => $rUpgradeData['id'], 'source' => 's:' . SERVER_ID . ':' . $rFile);
+                file_put_contents(WATCH_TMP_PATH . 'series_' . $rMatch->get('id') . '.cache', json_encode($rCacheData));
+            });
+        }
+        $rShowData = json_decode($rShow->getJSON(), true);
+        $rSeries = null;
+        if ($rShowData['id']) {
+            $db = self::db();
+            while (file_exists(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']))) {
+                if ($rTimeout < time() - filemtime(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']))) {
+                    unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
+                }
+                usleep(100000);
+            }
+            $rFileLock = fopen(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']), 'w');
+            while (!flock($rFileLock, LOCK_EX)) {
+                usleep(100000);
+            }
+            fwrite($rFileLock, time());
+            $rSeasonData = array();
+            foreach ($rShowData['seasons'] as $rSeason) {
+                $rSeason['cover'] = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rSeason['poster_path'];
+                if ($rSettings['download_images']) {
+                    $rSeason['cover'] = ImageUtils::downloadImage($rSeason['cover'], 2);
+                }
+                $rSeason['cover_big'] = $rSeason['cover'];
+                unset($rSeason['poster_path']);
+                $rSeasonData[] = $rSeason;
+            }
+            $rSeries = self::getSeriesByTMDB($rShowData['id']);
+            if (!$rSeries) {
+                $rSeriesArray = array('title' => $rShowData['name'], 'category_id' => array(), 'episode_run_time' => 0, 'tmdb_id' => $rShowData['id'], 'cover' => '', 'genre' => '', 'plot' => $rShowData['overview'], 'cast' => '', 'rating' => $rShowData['vote_average'], 'director' => '', 'release_date' => $rShowData['first_air_date'], 'last_modified' => time(), 'seasons' => $rSeasonData, 'backdrop_path' => array(), 'youtube_trailer' => '', 'year' => null);
+                $rSeriesArray['youtube_trailer'] = self::getSeriesTrailer($rShowData['id'], (!empty($rThreadData['language']) ? $rThreadData['language'] : $rSettings['tmdb_language']));
+                $rSeriesArray['cover'] = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rShowData['poster_path'];
+                $rSeriesArray['cover_big'] = $rSeriesArray['cover'];
+                $rSeriesArray['backdrop_path'] = array('https://image.tmdb.org/t/p/w1280' . $rShowData['backdrop_path']);
+                if ($rSettings['download_images']) {
+                    $rSeriesArray['cover'] = ImageUtils::downloadImage($rSeriesArray['cover'], 2);
+                    $rSeriesArray['backdrop_path'] = array(ImageUtils::downloadImage($rSeriesArray['backdrop_path'][0]));
+                }
+                $rCast = self::extractTopCast($rShowData['credits']);
+                $rSeriesArray['cast'] = implode(', ', $rCast);
+                $rDirectors = self::extractTopDirectors($rShowData['credits']);
+                $rSeriesArray['director'] = implode(', ', $rDirectors);
+                $rGenres = self::extractTopGenreNames($rShowData['genres'], $rThreadData['max_genres']);
+                if ($rShowData['first_air_date']) {
+                    $rSeriesArray['year'] = intval(substr($rShowData['first_air_date'], 0, 4));
+                }
+                $rSeriesArray['genre'] = implode(', ', $rGenres);
+                $rSeriesArray['episode_run_time'] = intval($rShowData['episode_run_time'][0] ?? 0);
+                if (count($rCategoryIDs) == 0) {
+                    $rCategoryIDs = self::resolveGenreCategoryIDs($rShowData['genres'], $rWatchCategories[2], $rThreadData['max_genres'], $rCategoryIDs);
+                }
+                if (count($rCategoryIDs) == 0 && !empty($rThreadData['fb_category_id'])) {
+                    if (is_array($rThreadData['fb_category_id'])) {
+                        $rCategoryIDs = array_map('intval', $rThreadData['fb_category_id']);
+                    } else {
+                        $rCategoryIDs = array(intval($rThreadData['fb_category_id']));
+                    }
+                }
+                if (count($rBouquetIDs) == 0) {
+                    $rBouquetIDs = self::resolveGenreBouquetIDs($rShowData['genres'], $rWatchCategories[2], $rThreadData['max_genres'], $rBouquetIDs);
+                }
+                if (count($rBouquetIDs) == 0 && !empty($rThreadData['fb_bouquets'])) {
+                    if (is_array($rThreadData['fb_bouquets'])) {
+                        $rBouquetIDs = array_map('intval', $rThreadData['fb_bouquets']);
+                    } else {
+                        $rBouquetIDs = json_decode($rThreadData['fb_bouquets'], true);
+                    }
+                }
+                if (count($rCategoryIDs) != 0) {
+                    $rSeriesArray['tmdb_language'] = $rLanguage;
+                    $rSeriesArray['category_id'] = '[' . implode(',', array_map('intval', $rCategoryIDs)) . ']';
+                    $rPrepare = QueryHelper::prepareArray($rSeriesArray);
+                    $rQuery = 'INSERT INTO `streams_series`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');';
+                    if ($db->query($rQuery, ...$rPrepare['data'])) {
+                        $rInsertID = $db->last_insert_id();
+                        $rSeries = self::getSerie($rInsertID);
+                        file_put_contents(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']), json_encode($rSeries));
+                        foreach ($rBouquetIDs as $rBouquet) {
+                            self::addToBouquet('series', $rBouquet, $rInsertID, $rThreadData['import'], $rFile);
+                        }
+                    } else {
+                        $rSeries = null;
+                    }
+                } else {
+                    flock($rFileLock, LOCK_UN);
+                    unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
+                    self::logWatchResult($rThreadType, $rFile, 3);
+                    exit();
+                }
+            } else {
+                $db->query('UPDATE `streams_series` SET `seasons` = ? WHERE `id` = ?;', json_encode($rSeasonData, JSON_UNESCAPED_UNICODE), $rSeries['id']);
+                if (!file_exists(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']))) {
+                    file_put_contents(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']), json_encode($rSeries));
+                }
+            }
+            flock($rFileLock, LOCK_UN);
+            unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
+            self::applyCommonStreamSettings($rImportArray, $rThreadData, false);
+            if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
+                if (is_array($rRelease['episode']) && count($rRelease['episode']) == 2) {
+                    $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rRelease['episode'][0]) . '-' . sprintf('%02d', $rRelease['episode'][1]);
+                } else {
+                    $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode);
+                }
+                $rEpisodes = json_decode($rTMDB->getSeason($rShowData['id'], intval($rReleaseSeason))->getJSON(), true);
+                foreach (($rEpisodes['episodes'] ?? array()) as $rEpisode) {
+                    if (intval($rEpisode['episode_number']) == $rReleaseEpisode) {
+                        $rImage = '';
+                        if (strlen($rEpisode['still_path'] ?? '') > 0) {
+                            $rImage = 'https://image.tmdb.org/t/p/w1280' . $rEpisode['still_path'];
+                            if ($rSettings['download_images']) {
+                                $rImage = ImageUtils::downloadImage($rImage, 5);
+                            }
+                        }
+                        if (strlen($rEpisode['name'] ?? '') > 0) {
+                            $rImportArray['stream_display_name'] .= ' - ' . $rEpisode['name'];
+                        }
+                        $rSeconds = intval($rShowData['episode_run_time'][0] ?? 0) * 60;
+                        $rImportArray['movie_properties'] = array('tmdb_id' => $rEpisode['id'], 'release_date' => $rEpisode['air_date'], 'plot' => $rEpisode['overview'], 'duration_secs' => $rSeconds, 'duration' => sprintf('%02d:%02d:%02d', $rSeconds / 3600, ($rSeconds / 60) % 60, $rSeconds % 60), 'movie_image' => $rImage, 'video' => array(), 'audio' => array(), 'bitrate' => 0, 'rating' => $rEpisode['vote_average'], 'season' => $rReleaseSeason);
+                        if (strlen($rImportArray['movie_properties']['movie_image']) == 0) {
+                            unset($rImportArray['movie_properties']['movie_image']);
+                        }
+                    }
+                }
+                if (strlen($rImportArray['stream_display_name']) == 0) {
+                    $rImportArray['stream_display_name'] = 'No Episode Title';
+                }
+            }
+        }
+        return array('importArray' => $rImportArray, 'categoryIDs' => $rCategoryIDs, 'bouquetIDs' => $rBouquetIDs, 'series' => $rSeries);
+    }
+
+    /**
+     * Разрешить fallback-категорию/букеты (когда genre-резолвинг ничего не
+     * дал) и записать итоговую строку в `streams` (+ streams_servers,
+     * bouquets/streams_episodes, auto_encode, watch_logs). Всегда завершает
+     * процесс через exit() — как и раньше, здесь нет пути "вернуться в run()"
+     * после этого вызова, поэтому метод не покрыт unit-тестами (аналогично
+     * applyUpgrade()).
+     *
+     * @param array $rThreadData
+     * @param int $rThreadType
+     * @param string $rFile
+     * @param object|null $rMatch Найденное TMDB-совпадение (для movie-кэша), либо null.
+     * @param array|null $rSeries Запись сериала (для series_no/streams_episodes), либо null.
+     * @param int|null $rReleaseSeason
+     * @param int|null $rReleaseEpisode
+     * @param array $rImportArray
+     * @param array $rCategoryIDs
+     * @param array $rBouquetIDs
+     * @return never
+     */
+    private static function persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries, $rReleaseSeason, $rReleaseEpisode, array $rImportArray, array $rCategoryIDs, array $rBouquetIDs) {
+        $db = self::db();
+        if ($rThreadData['type'] == 'movie') {
+            if (count($rCategoryIDs) == 0 && !empty($rThreadData['fb_category_id'])) {
+                if (is_array($rThreadData['fb_category_id'])) {
+                    $rCategoryIDs = array_map('intval', $rThreadData['fb_category_id']);
+                } else {
+                    $rCategoryIDs = array(intval($rThreadData['fb_category_id']));
+                }
+            }
+            if (count($rBouquetIDs) == 0 && !empty($rThreadData['fb_bouquets'])) {
+                if (is_array($rThreadData['fb_bouquets'])) {
+                    $rBouquetIDs = array_map('intval', $rThreadData['fb_bouquets']);
+                } else {
+                    $rBouquetIDs = json_decode($rThreadData['fb_bouquets'], true);
+                }
+            }
+            $rImportArray['category_id'] = '[' . implode(',', array_map('intval', $rCategoryIDs)) . ']';
+            if (count($rCategoryIDs) == 0) {
+                self::logWatchResult($rThreadType, $rFile, 3);
+                exit();
+            }
+        } else {
+            if ($rSeries) {
+                $rImportArray['series_no'] = $rSeries['id'];
+            } else {
+                self::logWatchResult($rThreadType, $rFile, 4);
+                exit();
+            }
+        }
+        if ($rThreadData['subtitles']) {
+            $rImportArray['movie_subtitles'] = $rThreadData['subtitles'];
+        }
+        $rImportArray['added'] = time();
+        $rPrepare = QueryHelper::prepareArray($rImportArray);
+        $rQuery = 'INSERT INTO `streams`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');';
+        if ($db->query($rQuery, ...$rPrepare['data'])) {
+            $rInsertID = $db->last_insert_id();
+            if ($rThreadData['import']) {
+                foreach ($rThreadData['servers'] as $rServerID) {
+                    $db->query('INSERT INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`) VALUES(?, ?, NULL);', $rInsertID, $rServerID);
+                }
+            } else {
+                $db->query('INSERT INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`) VALUES(?, ?, NULL);', $rInsertID, SERVER_ID);
+            }
+            if ($rThreadData['type'] == 'movie') {
+                if ($rMatch && !$rThreadData['import']) {
+                    file_put_contents(WATCH_TMP_PATH . 'movie_' . $rMatch->get('id') . '.cache', json_encode(array('id' => $rInsertID, 'source' => 's:' . SERVER_ID . ':' . $rFile)));
+                }
+                foreach ($rBouquetIDs as $rBouquet) {
+                    self::addToBouquet('movie', $rBouquet, $rInsertID, $rThreadData['import'], $rFile);
+                }
+            } else {
+                $db->query('INSERT INTO `streams_episodes`(`season_num`, `series_id`, `stream_id`, `episode_num`) VALUES(?, ?, ?, ?);', $rReleaseSeason, $rSeries['id'], $rInsertID, $rReleaseEpisode);
+            }
+            if ($rThreadData['auto_encode']) {
+                if ($rThreadData['import']) {
+                    foreach ($rThreadData['servers'] as $rServerID) {
+                        StreamProcess::queueMovie($rInsertID, $rServerID);
+                    }
+                } else {
+                    StreamProcess::queueMovie($rInsertID);
+                }
+            }
+            echo 'Success!' . "\n";
+            self::logWatchResult($rThreadType, $rFile, 1, $rInsertID);
+            exit();
+        } else {
+            echo 'Insert failed!' . "\n";
+            self::logWatchResult($rThreadType, $rFile, 2);
+            exit();
+        }
+    }
+
     public static function run($rThreadData = null, $rTimeout = 60) {
         $db = self::db();
 
@@ -723,188 +1052,16 @@ class WatchItem {
                     }
                     if ($rMatch) {
                         if ($rThreadData['type'] == 'movie') {
-                            if ($rThreadData['duplicate_tmdb']) {
-                                $rUpgradeData = null;
-                            } else {
-                                $rUpgradeData = self::getMovie($rMatch->get('id'));
-                            }
-
-                            if ($rUpgradeData) {
-                                self::applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, 'movie', function ($rUpgradeData) use ($rMatch, $rFile) {
-                                    file_put_contents(WATCH_TMP_PATH . 'movie_' . $rMatch->get('id') . '.cache', json_encode(array('id' => $rUpgradeData['id'], 'source' => 's:' . SERVER_ID . ':' . $rFile)));
-                                });
-                            }
-                            $rMovie = $rTMDB->getMovie($rMatch->get('id'));
-                            $rMovieData = json_decode($rMovie->getJSON(), true);
-                            $rMovieData['trailer'] = $rMovie->getTrailer();
-                            $rThumb = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rMovieData['poster_path'];
-                            $rBG = 'https://image.tmdb.org/t/p/w1280' . $rMovieData['backdrop_path'];
-                            if ($rSettings['download_images']) {
-                                $rThumb = ImageUtils::downloadImage($rThumb);
-                                $rBG = ImageUtils::downloadImage($rBG);
-                            }
-                            $rCast = self::extractTopCast($rMovieData['credits']);
-                            $rDirectors = self::extractTopDirectors($rMovieData['credits']);
-                            $rCountry = '';
-                            if (isset($rMovieData['production_countries'][0]['name'])) {
-                                $rCountry = $rMovieData['production_countries'][0]['name'];
-                            }
-                            $rGenres = self::extractTopGenreNames($rMovieData['genres'], 3);
-                            $rSeconds = intval($rMovieData['runtime']) * 60;
-                            $rImportArray['stream_display_name'] = $rMovieData['title'];
-                            if (strlen($rMovieData['release_date']) > 0) {
-                                $rImportArray['year'] = intval(substr($rMovieData['release_date'], 0, 4));
-                            }
-                            $rImportArray['tmdb_id'] = ($rMovieData['id'] ?: null);
-                            $rImportArray['movie_properties'] = array('kinopoisk_url' => 'https://www.themoviedb.org/movie/' . $rMovieData['id'], 'tmdb_id' => $rMovieData['id'], 'name' => $rMovieData['title'], 'o_name' => $rMovieData['original_title'], 'cover_big' => $rThumb, 'movie_image' => $rThumb, 'release_date' => $rMovieData['release_date'], 'episode_run_time' => $rMovieData['runtime'], 'youtube_trailer' => $rMovieData['trailer'], 'director' => implode(', ', $rDirectors), 'actors' => implode(', ', $rCast), 'cast' => implode(', ', $rCast), 'description' => $rMovieData['overview'], 'plot' => $rMovieData['overview'], 'age' => '', 'mpaa_rating' => '', 'rating_count_kinopoisk' => 0, 'country' => $rCountry, 'genre' => implode(', ', $rGenres), 'backdrop_path' => array($rBG), 'duration_secs' => $rSeconds, 'duration' => sprintf('%02d:%02d:%02d', $rSeconds / 3600, ($rSeconds / 60) % 60, $rSeconds % 60), 'video' => array(), 'audio' => array(), 'bitrate' => 0, 'rating' => $rMovieData['vote_average']);
-                            $rImportArray['rating'] = ($rImportArray['movie_properties']['rating'] ?: 0);
-                            self::applyCommonStreamSettings($rImportArray, $rThreadData);
-                            $rImportArray['tmdb_language'] = $rLanguage;
-                            if (count($rCategoryIDs) == 0 && !empty($rMovieData['genres']) && is_array($rMovieData['genres'])) {
-                                $rCategoryIDs = self::resolveGenreCategoryIDs($rMovieData['genres'], $rWatchCategories[1], $rThreadData['max_genres'], $rCategoryIDs);
-                            }
-                            if (count($rBouquetIDs) == 0) {
-                                $rBouquetIDs = self::resolveGenreBouquetIDs($rMovieData['genres'] ?? [], $rWatchCategories[1], $rThreadData['max_genres'], $rBouquetIDs);
-                            }
+                            $rBuilt = self::buildMovieImportArray($rTMDB, $rMatch, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
+                            $rImportArray = $rBuilt['importArray'];
+                            $rCategoryIDs = $rBuilt['categoryIDs'];
+                            $rBouquetIDs = $rBuilt['bouquetIDs'];
                         } else {
-                            $rShow = $rTMDB->getTVShow($rMatch->get('id'));
-                            if ($rThreadData['duplicate_tmdb']) {
-                                $rUpgradeData = null;
-                            } else {
-                                $rUpgradeData = self::getEpisode($rMatch->get('id'), $rReleaseSeason, $rReleaseEpisode);
-                            }
-                            if ($rUpgradeData) {
-                                self::applyUpgrade($rUpgradeData, $rThreadData, $rFile, $rImportArray, $rThreadType, 'episode', function ($rUpgradeData) use ($rMatch, $rReleaseSeason, $rReleaseEpisode, $rFile) {
-                                    $rCacheData = json_decode(file_get_contents(WATCH_TMP_PATH . 'series_' . $rMatch->get('id') . '.cache'), true);
-                                    $rCacheData[$rReleaseSeason . '_' . $rReleaseEpisode] = array('id' => $rUpgradeData['id'], 'source' => 's:' . SERVER_ID . ':' . $rFile);
-                                    file_put_contents(WATCH_TMP_PATH . 'series_' . $rMatch->get('id') . '.cache', json_encode($rCacheData));
-                                });
-                            }
-                            $rShowData = json_decode($rShow->getJSON(), true);
-                            if ($rShowData['id']) {
-                                while (file_exists(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']))) {
-                                    if ($rTimeout < time() - filemtime(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']))) {
-                                        unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
-                                    }
-                                    usleep(100000);
-                                }
-                                $rFileLock = fopen(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']), 'w');
-                                while (!flock($rFileLock, LOCK_EX)) {
-                                    usleep(100000);
-                                }
-                                fwrite($rFileLock, time());
-                                $rSeasonData = array();
-                                foreach ($rShowData['seasons'] as $rSeason) {
-                                    $rSeason['cover'] = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rSeason['poster_path'];
-                                    if ($rSettings['download_images']) {
-                                        $rSeason['cover'] = ImageUtils::downloadImage($rSeason['cover'], 2);
-                                    }
-                                    $rSeason['cover_big'] = $rSeason['cover'];
-                                    unset($rSeason['poster_path']);
-                                    $rSeasonData[] = $rSeason;
-                                }
-                                $rSeries = self::getSeriesByTMDB($rShowData['id']);
-                                if (!$rSeries) {
-                                    $rSeriesArray = array('title' => $rShowData['name'], 'category_id' => array(), 'episode_run_time' => 0, 'tmdb_id' => $rShowData['id'], 'cover' => '', 'genre' => '', 'plot' => $rShowData['overview'], 'cast' => '', 'rating' => $rShowData['vote_average'], 'director' => '', 'release_date' => $rShowData['first_air_date'], 'last_modified' => time(), 'seasons' => $rSeasonData, 'backdrop_path' => array(), 'youtube_trailer' => '', 'year' => null);
-                                    $rSeriesArray['youtube_trailer'] = self::getSeriesTrailer($rShowData['id'], (!empty($rThreadData['language']) ? $rThreadData['language'] : $rSettings['tmdb_language']));
-                                    $rSeriesArray['cover'] = 'https://image.tmdb.org/t/p/w600_and_h900_bestv2' . $rShowData['poster_path'];
-                                    $rSeriesArray['cover_big'] = $rSeriesArray['cover'];
-                                    $rSeriesArray['backdrop_path'] = array('https://image.tmdb.org/t/p/w1280' . $rShowData['backdrop_path']);
-                                    if ($rSettings['download_images']) {
-                                        $rSeriesArray['cover'] = ImageUtils::downloadImage($rSeriesArray['cover'], 2);
-                                        $rSeriesArray['backdrop_path'] = array(ImageUtils::downloadImage($rSeriesArray['backdrop_path'][0]));
-                                    }
-                                    $rCast = self::extractTopCast($rShowData['credits']);
-                                    $rSeriesArray['cast'] = implode(', ', $rCast);
-                                    $rDirectors = self::extractTopDirectors($rShowData['credits']);
-                                    $rSeriesArray['director'] = implode(', ', $rDirectors);
-                                    $rGenres = self::extractTopGenreNames($rShowData['genres'], $rThreadData['max_genres']);
-                                    if ($rShowData['first_air_date']) {
-                                        $rSeriesArray['year'] = intval(substr($rShowData['first_air_date'], 0, 4));
-                                    }
-                                    $rSeriesArray['genre'] = implode(', ', $rGenres);
-                                    $rSeriesArray['episode_run_time'] = intval($rShowData['episode_run_time'][0] ?? 0);
-                                    if (count($rCategoryIDs) == 0) {
-                                        $rCategoryIDs = self::resolveGenreCategoryIDs($rShowData['genres'], $rWatchCategories[2], $rThreadData['max_genres'], $rCategoryIDs);
-                                    }
-                                    if (count($rCategoryIDs) == 0 && !empty($rThreadData['fb_category_id'])) {
-                                        if (is_array($rThreadData['fb_category_id'])) {
-                                            $rCategoryIDs = array_map('intval', $rThreadData['fb_category_id']);
-                                        } else {
-                                            $rCategoryIDs = array(intval($rThreadData['fb_category_id']));
-                                        }
-                                    }
-                                    if (count($rBouquetIDs) == 0) {
-                                        $rBouquetIDs = self::resolveGenreBouquetIDs($rShowData['genres'], $rWatchCategories[2], $rThreadData['max_genres'], $rBouquetIDs);
-                                    }
-                                    if (count($rBouquetIDs) == 0 && !empty($rThreadData['fb_bouquets'])) {
-                                        if (is_array($rThreadData['fb_bouquets'])) {
-                                            $rBouquetIDs = array_map('intval', $rThreadData['fb_bouquets']);
-                                        } else {
-                                            $rBouquetIDs = json_decode($rThreadData['fb_bouquets'], true);
-                                        }
-                                    }
-                                    if (count($rCategoryIDs) != 0) {
-                                        $rSeriesArray['tmdb_language'] = $rLanguage;
-                                        $rSeriesArray['category_id'] = '[' . implode(',', array_map('intval', $rCategoryIDs)) . ']';
-                                        $rPrepare = QueryHelper::prepareArray($rSeriesArray);
-                                        $rQuery = 'INSERT INTO `streams_series`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');';
-                                        if ($db->query($rQuery, ...$rPrepare['data'])) {
-                                            $rInsertID = $db->last_insert_id();
-                                            $rSeries = self::getSerie($rInsertID);
-                                            file_put_contents(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']), json_encode($rSeries));
-                                            foreach ($rBouquetIDs as $rBouquet) {
-                                                self::addToBouquet('series', $rBouquet, $rInsertID, $rThreadData['import'], $rFile);
-                                            }
-                                        } else {
-                                            $rSeries = null;
-                                        }
-                                    } else {
-                                        flock($rFileLock, LOCK_UN);
-                                        unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
-                                        self::logWatchResult($rThreadType, $rFile, 3);
-                                        exit();
-                                    }
-                                } else {
-                                    $db->query('UPDATE `streams_series` SET `seasons` = ? WHERE `id` = ?;', json_encode($rSeasonData, JSON_UNESCAPED_UNICODE), $rSeries['id']);
-                                    if (!file_exists(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']))) {
-                                        file_put_contents(WATCH_TMP_PATH . 'series_' . intval($rShowData['id']), json_encode($rSeries));
-                                    }
-                                }
-                                flock($rFileLock, LOCK_UN);
-                                unlink(WATCH_TMP_PATH . 'lock_' . intval($rShowData['id']));
-                                self::applyCommonStreamSettings($rImportArray, $rThreadData, false);
-                                if ($rReleaseSeason !== null && $rReleaseEpisode !== null) {
-                                    if (is_array($rRelease['episode']) && count($rRelease['episode']) == 2) {
-                                        $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rRelease['episode'][0]) . '-' . sprintf('%02d', $rRelease['episode'][1]);
-                                    } else {
-                                        $rImportArray['stream_display_name'] = $rShowData['name'] . ' - S' . sprintf('%02d', intval($rReleaseSeason)) . 'E' . sprintf('%02d', $rReleaseEpisode);
-                                    }
-                                    $rEpisodes = json_decode($rTMDB->getSeason($rShowData['id'], intval($rReleaseSeason))->getJSON(), true);
-                                    foreach (($rEpisodes['episodes'] ?? array()) as $rEpisode) {
-                                        if (intval($rEpisode['episode_number']) == $rReleaseEpisode) {
-                                            $rImage = '';
-                                            if (strlen($rEpisode['still_path'] ?? '') > 0) {
-                                                $rImage = 'https://image.tmdb.org/t/p/w1280' . $rEpisode['still_path'];
-                                                if ($rSettings['download_images']) {
-                                                    $rImage = ImageUtils::downloadImage($rImage, 5);
-                                                }
-                                            }
-                                            if (strlen($rEpisode['name'] ?? '') > 0) {
-                                                $rImportArray['stream_display_name'] .= ' - ' . $rEpisode['name'];
-                                            }
-                                            $rSeconds = intval($rShowData['episode_run_time'][0] ?? 0) * 60;
-                                            $rImportArray['movie_properties'] = array('tmdb_id' => $rEpisode['id'], 'release_date' => $rEpisode['air_date'], 'plot' => $rEpisode['overview'], 'duration_secs' => $rSeconds, 'duration' => sprintf('%02d:%02d:%02d', $rSeconds / 3600, ($rSeconds / 60) % 60, $rSeconds % 60), 'movie_image' => $rImage, 'video' => array(), 'audio' => array(), 'bitrate' => 0, 'rating' => $rEpisode['vote_average'], 'season' => $rReleaseSeason);
-                                            if (strlen($rImportArray['movie_properties']['movie_image']) == 0) {
-                                                unset($rImportArray['movie_properties']['movie_image']);
-                                            }
-                                        }
-                                    }
-                                    if (strlen($rImportArray['stream_display_name']) == 0) {
-                                        $rImportArray['stream_display_name'] = 'No Episode Title';
-                                    }
-                                }
-                            }
+                            $rBuilt = self::buildSeriesImportArray($rTMDB, $rMatch, $rRelease ?? null, $rThreadData, $rSettings, $rWatchCategories, $rFile, $rThreadType, $rTimeout, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs, $rLanguage);
+                            $rImportArray = $rBuilt['importArray'];
+                            $rCategoryIDs = $rBuilt['categoryIDs'];
+                            $rBouquetIDs = $rBuilt['bouquetIDs'];
+                            $rSeries = $rBuilt['series'];
                         }
                     } else {
                         if ($rThreadData['type'] == 'movie') {
@@ -920,76 +1077,7 @@ class WatchItem {
                         self::applyCommonStreamSettings($rImportArray, $rThreadData);
                         $rImportArray['tmdb_language'] = $rLanguage;
                     }
-                    if ($rThreadData['type'] == 'movie') {
-                        if (count($rCategoryIDs) == 0 && !empty($rThreadData['fb_category_id'])) {
-                            if (is_array($rThreadData['fb_category_id'])) {
-                                $rCategoryIDs = array_map('intval', $rThreadData['fb_category_id']);
-                            } else {
-                                $rCategoryIDs = array(intval($rThreadData['fb_category_id']));
-                            }
-                        }
-                        if (count($rBouquetIDs) == 0 && !empty($rThreadData['fb_bouquets'])) {
-                            if (is_array($rThreadData['fb_bouquets'])) {
-                                $rBouquetIDs = array_map('intval', $rThreadData['fb_bouquets']);
-                            } else {
-                                $rBouquetIDs = json_decode($rThreadData['fb_bouquets'], true);
-                            }
-                        }
-                        $rImportArray['category_id'] = '[' . implode(',', array_map('intval', $rCategoryIDs)) . ']';
-                        if (count($rCategoryIDs) == 0) {
-                            self::logWatchResult($rThreadType, $rFile, 3);
-                            exit();
-                        }
-                    } else {
-                        if ($rSeries) {
-                            $rImportArray['series_no'] = $rSeries['id'];
-                        } else {
-                            self::logWatchResult($rThreadType, $rFile, 4);
-                            exit();
-                        }
-                    }
-                    if ($rThreadData['subtitles']) {
-                        $rImportArray['movie_subtitles'] = $rThreadData['subtitles'];
-                    }
-                    $rImportArray['added'] = time();
-                    $rPrepare = QueryHelper::prepareArray($rImportArray);
-                    $rQuery = 'INSERT INTO `streams`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');';
-                    if ($db->query($rQuery, ...$rPrepare['data'])) {
-                        $rInsertID = $db->last_insert_id();
-                        if ($rThreadData['import']) {
-                            foreach ($rThreadData['servers'] as $rServerID) {
-                                $db->query('INSERT INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`) VALUES(?, ?, NULL);', $rInsertID, $rServerID);
-                            }
-                        } else {
-                            $db->query('INSERT INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`) VALUES(?, ?, NULL);', $rInsertID, SERVER_ID);
-                        }
-                        if ($rThreadData['type'] == 'movie') {
-                            if ($rMatch && !$rThreadData['import']) {
-                                file_put_contents(WATCH_TMP_PATH . 'movie_' . $rMatch->get('id') . '.cache', json_encode(array('id' => $rInsertID, 'source' => 's:' . SERVER_ID . ':' . $rFile)));
-                            }
-                            foreach ($rBouquetIDs as $rBouquet) {
-                                self::addToBouquet('movie', $rBouquet, $rInsertID, $rThreadData['import'], $rFile);
-                            }
-                        } else {
-                            $db->query('INSERT INTO `streams_episodes`(`season_num`, `series_id`, `stream_id`, `episode_num`) VALUES(?, ?, ?, ?);', $rReleaseSeason, $rSeries['id'], $rInsertID, $rReleaseEpisode);
-                        }
-                        if ($rThreadData['auto_encode']) {
-                            if ($rThreadData['import']) {
-                                foreach ($rThreadData['servers'] as $rServerID) {
-                                    StreamProcess::queueMovie($rInsertID, $rServerID);
-                                }
-                            } else {
-                                StreamProcess::queueMovie($rInsertID);
-                            }
-                        }
-                        echo 'Success!' . "\n";
-                        self::logWatchResult($rThreadType, $rFile, 1, $rInsertID);
-                        exit();
-                    } else {
-                        echo 'Insert failed!' . "\n";
-                        self::logWatchResult($rThreadType, $rFile, 2);
-                        exit();
-                    }
+                    self::persistImport($rThreadData, $rThreadType, $rFile, $rMatch, $rSeries ?? null, $rReleaseSeason, $rReleaseEpisode, $rImportArray, $rCategoryIDs, $rBouquetIDs);
                 } else {
                     echo 'File is broken!' . "\n";
                     self::logWatchResult($rThreadType, $rFile, 5);
