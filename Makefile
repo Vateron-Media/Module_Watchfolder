@@ -11,6 +11,7 @@ release: clean
 	@tmp=$$(mktemp) && tar \
 	  --exclude=./.git \
 	  --exclude=./.github \
+	  --exclude=./tests \
 	  --exclude=./Makefile \
 	  --exclude=./README.md \
 	  --exclude=./RELEASE.md \

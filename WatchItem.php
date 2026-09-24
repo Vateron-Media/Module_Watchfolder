@@ -270,7 +270,7 @@ class WatchItem {
      * @param int $rLimit
      * @return string[]
      */
-    private static function extractTopCast(array $rCredits, $rLimit = 5) {
+    public static function extractTopCast(array $rCredits, $rLimit = 5) {
         $rCast = array();
         foreach (($rCredits['cast'] ?? array()) as $rMember) {
             if (count($rCast) >= $rLimit) {
@@ -288,7 +288,7 @@ class WatchItem {
      * @param int $rLimit
      * @return string[]
      */
-    private static function extractTopDirectors(array $rCredits, $rLimit = 5) {
+    public static function extractTopDirectors(array $rCredits, $rLimit = 5) {
         $rDirectors = array();
         foreach (($rCredits['crew'] ?? array()) as $rMember) {
             if (count($rDirectors) >= $rLimit) {
@@ -309,7 +309,7 @@ class WatchItem {
      * @param int $rLimit
      * @return string[]
      */
-    private static function extractTopGenreNames(array $rGenres, $rLimit) {
+    public static function extractTopGenreNames(array $rGenres, $rLimit) {
         $rNames = array();
         foreach ($rGenres as $rGenre) {
             if (count($rNames) >= $rLimit) {
@@ -329,7 +329,7 @@ class WatchItem {
      * @param array $rCategoryIDs
      * @return array
      */
-    private static function resolveGenreCategoryIDs(array $rGenres, array $rWatchCategoryMap, $rMaxGenres, array $rCategoryIDs) {
+    public static function resolveGenreCategoryIDs(array $rGenres, array $rWatchCategoryMap, $rMaxGenres, array $rCategoryIDs) {
         $rParsed = (0 < $rMaxGenres) ? array_slice($rGenres, 0, (int) $rMaxGenres) : $rGenres;
         foreach ($rParsed as $rGenre) {
             $rGenreId = (int) ($rGenre['id'] ?? 0);
@@ -350,7 +350,7 @@ class WatchItem {
      * @param array $rBouquetIDs
      * @return array
      */
-    private static function resolveGenreBouquetIDs(array $rGenres, array $rWatchCategoryMap, $rMaxGenres, array $rBouquetIDs) {
+    public static function resolveGenreBouquetIDs(array $rGenres, array $rWatchCategoryMap, $rMaxGenres, array $rBouquetIDs) {
         $rParsed = (0 < $rMaxGenres) ? array_slice($rGenres, 0, (int) $rMaxGenres) : $rGenres;
         foreach ($rParsed as $rGenre) {
             $rGenreId = (int) ($rGenre['id'] ?? 0);
@@ -386,6 +386,141 @@ class WatchItem {
             $rImportArray['direct_proxy'] = $rThreadData['direct_proxy'];
         }
         $rImportArray['order'] = self::getNextOrder();
+    }
+
+    /**
+     * Найти лучшее совпадение в TMDB для распарсенного названия/альт-названия.
+     *
+     * Ищет по названию (и повторно без года, если с годом ничего не нашлось),
+     * а затем выбирает кандидата с максимальным процентом схожести названия
+     * (точное совпадение альт-названия или основного названия даёт мгновенные 100%).
+     * Если ничего не подошло по прямому сравнению, но включены alternative_titles
+     * и год совпадает, дополнительно проверяет альтернативные названия с TMDB.
+     *
+     * @param object $rTMDB Клиент TMDB (searchMovie/searchTVShow/getMovieTitles/getSeriesTitles).
+     * @param array $rThreadData
+     * @param array $rSettings
+     * @param string $rTitle
+     * @param string|null $rAltTitle
+     * @param int|null $rYear
+     * @return object|null Объект Movie/TVShow с максимальным процентом схожести, либо null.
+     */
+    public static function findBestTmdbMatch($rTMDB, array $rThreadData, array $rSettings, $rTitle, $rAltTitle, $rYear) {
+        $rMatches = array();
+        $rSearchYear = $rYear;
+        foreach (range(0, 1) as $rIgnoreYear) {
+            if ($rIgnoreYear) {
+                if ($rSearchYear) {
+                    $rSearchYear = null;
+                } else {
+                    break;
+                }
+            }
+            if ($rThreadData['type'] == 'movie') {
+                print_r('Searching Movie: ' . $rTitle . ' Year: ' . $rSearchYear . "\n");
+                $rResults = $rTMDB->searchMovie($rTitle, $rSearchYear);
+            } else {
+                print_r('Searching TV Show: ' . $rTitle . ' Year: ' . $rSearchYear . "\n");
+                $rResults = $rTMDB->searchTVShow($rTitle, $rSearchYear);
+            }
+            foreach ($rResults as $rResultArr) {
+                $tmdbTitles = [];
+
+                if ($rThreadData['type'] === 'movie') {
+                    $tmdbTitles[] = $rResultArr->get('title');
+                    $tmdbTitles[] = $rResultArr->get('original_title');
+                } else {
+                    $tmdbTitles[] = $rResultArr->get('name');
+                    $tmdbTitles[] = $rResultArr->get('original_name');
+                }
+
+                $tmdbTitles = array_filter($tmdbTitles);
+
+                $rPercentage = 0;
+                $rPercentageAlt = 0;
+
+                foreach ($tmdbTitles as $tmdbTitle) {
+                    similar_text(self::parseTitle($rTitle), self::parseTitle($tmdbTitle), $p);
+                    $rPercentage = max($rPercentage, $p);
+
+                    if ($rAltTitle) {
+                        similar_text(self::parseTitle($rAltTitle), self::parseTitle($tmdbTitle), $pAlt);
+                        $rPercentageAlt = max($rPercentageAlt, $pAlt);
+                    }
+                }
+
+                $rReleaseDate = (string) ($rResultArr->get('release_date') ?: $rResultArr->get('first_air_date'));
+                $rReleaseYear = intval(substr($rReleaseDate, 0, 4));
+                if ($rSettings['percentage_match'] <= $rPercentage || $rSettings['percentage_match'] <= $rPercentageAlt) {
+                    if ($rSearchYear && !in_array($rReleaseYear, range(intval($rSearchYear) - 1, intval($rSearchYear) + 1))) {
+                    } else {
+                        if ($rAltTitle && self::parseTitle(($rResultArr->get('title') ?: $rResultArr->get('name'))) == self::parseTitle($rAltTitle)) {
+                            $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
+                            break;
+                        }
+                        foreach ($tmdbTitles as $tmdbTitle) {
+                            if ($rAltTitle && self::parseTitle($tmdbTitle) === self::parseTitle($rAltTitle)) {
+                                $rMatches = [['percentage' => 100, 'data' => $rResultArr]];
+                                break 2;
+                            }
+
+                            if (!$rAltTitle && self::parseTitle($tmdbTitle) === self::parseTitle($rTitle)) {
+                                $rMatches = [['percentage' => 100, 'data' => $rResultArr]];
+                                break 2;
+                            }
+                        }
+                        $rMatches[] = array('percentage' => $rPercentage, 'data' => $rResultArr);
+                    }
+                } else {
+                    if ($rThreadData['alternative_titles'] && in_array($rReleaseYear, range(intval($rSearchYear) - 1, intval($rSearchYear) + 1))) {
+                        $rPartialMatch = false;
+
+                        foreach ($tmdbTitles as $tmdbTitle) {
+                            if (strpos(self::parseTitle($rTitle), self::parseTitle($tmdbTitle)) === 0) {
+                                $rPartialMatch = true;
+                                break;
+                            }
+
+                            if ($rAltTitle && strpos(self::parseTitle($rAltTitle), self::parseTitle($tmdbTitle)) === 0) {
+                                $rPartialMatch = true;
+                                break;
+                            }
+                        }
+                        if ($rPartialMatch) {
+                            if ($rThreadData['type'] == 'movie') {
+                                $rTitleData = $rTMDB->getMovieTitles($rResultArr->get('id'));
+                            } else {
+                                $rTitleData = $rTMDB->getSeriesTitles($rResultArr->get('id'));
+                            }
+                            $rAlternativeTitles = (is_array($rTitleData) && isset($rTitleData['titles']) && is_array($rTitleData['titles']) ? $rTitleData['titles'] : array());
+                            foreach ($rAlternativeTitles as $rAlternativeTitle) {
+                                if ($rAltTitle && self::parseTitle($rAlternativeTitle['title']) == self::parseTitle($rAltTitle)) {
+                                    $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
+                                    break;
+                                }
+                                if (self::parseTitle($rAlternativeTitle['title']) != self::parseTitle($rTitle) || $rAltTitle) {
+                                } else {
+                                    $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (count($rMatches) > 0) {
+                break;
+            }
+        }
+        if (count($rMatches) > 0) {
+            $rMax = max(array_column($rMatches, 'percentage'));
+            $rKeys = array_filter(array_map(function ($rMatches) use ($rMax) {
+                return ($rMatches['percentage'] == $rMax ? $rMatches['data'] : null);
+            }, $rMatches));
+            list($rMatch) = array_values($rKeys);
+            return $rMatch;
+        }
+        return null;
     }
 
     public static function run($rThreadData = null, $rTimeout = 60) {
@@ -551,122 +686,13 @@ class WatchItem {
                                 }
                                 echo 'Title: ' . $rTitle . "\n";
                                 if (!$rThreadData['disable_tmdb']) {
-                                    $rMatches = array();
-                                    $rSearchYear = $rYear;
-                                    foreach (range(0, 1) as $rIgnoreYear) {
-                                        if ($rIgnoreYear) {
-                                            if ($rSearchYear) {
-                                                $rSearchYear = null;
-                                            } else {
-                                                break;
-                                            }
-                                        }
-                                        if ($rThreadData['type'] == 'movie') {
-                                            print_r('Searching Movie: ' . $rTitle . ' Year: ' . $rSearchYear . "\n");
-                                            $rResults = $rTMDB->searchMovie($rTitle, $rSearchYear);
-                                        } else {
-                                            print_r('Searching TV Show: ' . $rTitle . ' Year: ' . $rSearchYear . "\n");
-                                            $rResults = $rTMDB->searchTVShow($rTitle, $rSearchYear);
-                                        }
-                                        foreach ($rResults as $rResultArr) {
-                                            $tmdbTitles = [];
-
-                                            if ($rThreadData['type'] === 'movie') {
-                                                $tmdbTitles[] = $rResultArr->get('title');
-                                                $tmdbTitles[] = $rResultArr->get('original_title');
-                                            } else {
-                                                $tmdbTitles[] = $rResultArr->get('name');
-                                                $tmdbTitles[] = $rResultArr->get('original_name');
-                                            }
-
-                                            $tmdbTitles = array_filter($tmdbTitles);
-
-                                            $rPercentage = 0;
-                                            $rPercentageAlt = 0;
-
-                                            foreach ($tmdbTitles as $tmdbTitle) {
-                                                similar_text(self::parseTitle($rTitle), self::parseTitle($tmdbTitle), $p);
-                                                $rPercentage = max($rPercentage, $p);
-
-                                                if ($rAltTitle) {
-                                                    similar_text(self::parseTitle($rAltTitle), self::parseTitle($tmdbTitle), $pAlt);
-                                                    $rPercentageAlt = max($rPercentageAlt, $pAlt);
-                                                }
-                                            }
-
-                                            $rReleaseDate = (string) ($rResultArr->get('release_date') ?: $rResultArr->get('first_air_date'));
-                                            $rReleaseYear = intval(substr($rReleaseDate, 0, 4));
-                                            if ($rSettings['percentage_match'] <= $rPercentage || $rSettings['percentage_match'] <= $rPercentageAlt) {
-                                                if ($rSearchYear && !in_array($rReleaseYear, range(intval($rSearchYear) - 1, intval($rSearchYear) + 1))) {
-                                                } else {
-                                                    if ($rAltTitle && self::parseTitle(($rResultArr->get('title') ?: $rResultArr->get('name'))) == self::parseTitle($rAltTitle)) {
-                                                        $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
-                                                        break;
-                                                    }
-                                                    foreach ($tmdbTitles as $tmdbTitle) {
-                                                        if ($rAltTitle && self::parseTitle($tmdbTitle) === self::parseTitle($rAltTitle)) {
-                                                            $rMatches = [['percentage' => 100, 'data' => $rResultArr]];
-                                                            break 2;
-                                                        }
-
-                                                        if (!$rAltTitle && self::parseTitle($tmdbTitle) === self::parseTitle($rTitle)) {
-                                                            $rMatches = [['percentage' => 100, 'data' => $rResultArr]];
-                                                            break 2;
-                                                        }
-                                                    }
-                                                    $rMatches[] = array('percentage' => $rPercentage, 'data' => $rResultArr);
-                                                }
-                                            } else {
-                                                if ($rThreadData['alternative_titles'] && in_array($rReleaseYear, range(intval($rSearchYear) - 1, intval($rSearchYear) + 1))) {
-                                                    $rPartialMatch = false;
-
-                                                    foreach ($tmdbTitles as $tmdbTitle) {
-                                                        if (strpos(self::parseTitle($rTitle), self::parseTitle($tmdbTitle)) === 0) {
-                                                            $rPartialMatch = true;
-                                                            break;
-                                                        }
-
-                                                        if ($rAltTitle && strpos(self::parseTitle($rAltTitle), self::parseTitle($tmdbTitle)) === 0) {
-                                                            $rPartialMatch = true;
-                                                            break;
-                                                        }
-                                                    }
-                                                    if ($rPartialMatch) {
-                                                        if ($rThreadData['type'] == 'movie') {
-                                                            $rTitleData = $rTMDB->getMovieTitles($rResultArr->get('id'));
-                                                        } else {
-                                                            $rTitleData = $rTMDB->getSeriesTitles($rResultArr->get('id'));
-                                                        }
-                                                        $rAlternativeTitles = (is_array($rTitleData) && isset($rTitleData['titles']) && is_array($rTitleData['titles']) ? $rTitleData['titles'] : array());
-                                                        foreach ($rAlternativeTitles as $rAlternativeTitle) {
-                                                            if ($rAltTitle && self::parseTitle($rAlternativeTitle['title']) == self::parseTitle($rAltTitle)) {
-                                                                $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
-                                                                break;
-                                                            }
-                                                            if (self::parseTitle($rAlternativeTitle['title']) != self::parseTitle($rTitle) || $rAltTitle) {
-                                                            } else {
-                                                                $rMatches = array(array('percentage' => 100, 'data' => $rResultArr));
-                                                                break;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        if (count($rMatches) > 0) {
-                                            break;
-                                        }
-                                    }
-                                    if (count($rMatches) > 0) {
-                                        $rMax = max(array_column($rMatches, 'percentage'));
-                                        $rKeys = array_filter(array_map(function ($rMatches) use ($rMax) {
-                                            return ($rMatches['percentage'] == $rMax ? $rMatches['data'] : null);
-                                        }, $rMatches));
-                                        list($rMatch) = array_values($rKeys);
+                                    $rFoundMatch = self::findBestTmdbMatch($rTMDB, $rThreadData, $rSettings, $rTitle, $rAltTitle, $rYear);
+                                    if ($rFoundMatch) {
+                                        $rMatch = $rFoundMatch;
                                     }
                                 }
                                 if ($rMatch) {
-                                    break;
+                                    break 2;
                                 }
                             } else {
                                 self::logWatchResult($rThreadType, $rFile, 4);
