@@ -84,6 +84,9 @@ through `$router->api(...)` in `WatchModule::registerRoutes()` (`enable_watch`,
 
 1. Remove `case 'settings_watch'`, `case 'watch_add'`, `case 'record'` and the
    `WatchService` / `RecordingService` imports from `src/Public/Views/admin/post.php`.
+   Drop `settings_watch` and `watch_add` from `PageAuthorization::MODULE_POST_ACTIONS`
+   (`src/Core/Auth/PageAuthorization.php`), which holds them to the module's
+   permissions until then.
 2. Remove core's `src/Public/Views/admin/record.php` and its route (if any), and drop
    `case 'record'` from `PageAuthorization::checkPermissions()` if the module owns the
    page now. Keep the `record?…` links in the core views; they now land on the module's
