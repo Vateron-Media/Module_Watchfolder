@@ -7,7 +7,6 @@ use XcVm\Core\Http\RequestManager;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Public\Controllers\Admin\TableController;
 use XcVm\Domain\Bouquet\BouquetService;
-use XcVm\Domain\Stream\StreamRepository;
 use XcVm\Infrastructure\Database\DatabaseFactory;
 
 /**
@@ -66,7 +65,7 @@ class WatchController {
         global $rMobile, $rSettings, $rPermissions, $language, $rTMDBLanguages;
 
         if (isset(RequestManager::getAll()['id'])) {
-            $rFolder = StreamRepository::getWatchFolder(RequestManager::getAll()['id']);
+            $rFolder = WatchService::getWatchFolder(RequestManager::getAll()['id']);
             if (!$rFolder) {
                 AdminHelpers::goHome();
             }
@@ -164,13 +163,13 @@ class WatchController {
         $rFolderID = RequestManager::getAll()['folder_id'] ?? 0;
 
         if ($rSub === 'delete') {
-            StreamRepository::deleteWatchFolder($rFolderID);
+            WatchService::deleteWatchFolder($rFolderID);
             echo json_encode(['result' => true]);
             exit();
         }
 
         if ($rSub === 'force') {
-            $rFolder = StreamRepository::getWatchFolder($rFolderID);
+            $rFolder = WatchService::getWatchFolder($rFolderID);
             if ($rFolder) {
                 WatchService::forceWatch($rFolder['server_id'], $rFolder['id']);
                 echo json_encode(['result' => true]);

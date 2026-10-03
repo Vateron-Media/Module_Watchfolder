@@ -7,7 +7,6 @@ use XcVm\Core\Database\QueryHelper;
 use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
-use XcVm\Domain\Stream\StreamRepository;
 
 /**
  * WatchService — watch service
@@ -42,7 +41,7 @@ class WatchService {
 	public static function processWatchFolder($rData) {
 		$db = self::db();
 		if (isset($rData['edit'])) {
-			$rArray = AdminHelpers::overwriteData(StreamRepository::getWatchFolder($rData['edit']), $rData);
+			$rArray = AdminHelpers::overwriteData(self::getWatchFolder($rData['edit']), $rData);
 		} else {
 			$rArray = QueryHelper::verifyPostTable('watch_folders', $rData);
 			unset($rArray['id']);
@@ -97,7 +96,7 @@ class WatchService {
 	 * @return array
 	 */
 	public static function apiGetFolder(int $rID) {
-		$rFolder = StreamRepository::getWatchFolder($rID);
+		$rFolder = self::getWatchFolder($rID);
 		return $rFolder ? array('status' => STATUS_SUCCESS, 'data' => $rFolder) : array('status' => STATUS_FAILURE);
 	}
 
@@ -112,7 +111,7 @@ class WatchService {
 	public static function apiSaveFolder(array $rData, ?int $rID = null) {
 		unset($rData['edit'], $rData['id']);
 		if ($rID !== null) {
-			if (!StreamRepository::getWatchFolder($rID)) {
+			if (!self::getWatchFolder($rID)) {
 				return array('status' => STATUS_FAILURE);
 			}
 			$rData['edit'] = $rID;
@@ -131,7 +130,33 @@ class WatchService {
 	 * @return array
 	 */
 	public static function apiDeleteFolder(int $rID) {
-		return array('status' => (StreamRepository::getWatchFolder($rID) && StreamRepository::deleteWatchFolder($rID)) ? STATUS_SUCCESS : STATUS_FAILURE);
+		return array('status' => self::deleteWatchFolder($rID) ? STATUS_SUCCESS : STATUS_FAILURE);
+	}
+
+	/**
+	 * A watch-folder row by id.
+	 *
+	 * @param int $rID
+	 * @return array|false The row, or false if there is none.
+	 */
+	public static function getWatchFolder(int $rID) {
+		$db = self::db();
+		$db->query('SELECT * FROM `watch_folders` WHERE `id` = ?;', $rID);
+		return $db->num_rows() == 1 ? $db->get_row() : false;
+	}
+
+	/**
+	 * Delete a watch folder.
+	 *
+	 * @param int $rID
+	 * @return bool False if there is no such folder.
+	 */
+	public static function deleteWatchFolder(int $rID) {
+		if (!self::getWatchFolder($rID)) {
+			return false;
+		}
+		self::db()->query('DELETE FROM `watch_folders` WHERE `id` = ?;', $rID);
+		return true;
 	}
 
 	public static function getWatchFolders($rType = null) {

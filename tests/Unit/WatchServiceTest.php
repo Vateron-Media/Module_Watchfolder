@@ -105,7 +105,6 @@ final class WatchServiceTest extends TestCase {
     }
 
     public function testApiGetAndDeleteFolder(): void {
-        \XcVm\Domain\Stream\StreamRepository::setDb($this->db);
         $this->db->query('INSERT INTO watch_folders (id, bouquets, fb_bouquets) VALUES (3, ?, ?);', '[]', '[]');
 
         $this->assertSame(3, (int) WatchService::apiGetFolder(3)['data']['id']);
