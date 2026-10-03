@@ -12,7 +12,7 @@ The `watch` module scans configured folders (local paths or remote locations via
 - Per-file processing (TMDb match and insert) performed by core's `vod_import_item` command; the module logs each outcome to `watch_logs` (requires core >= 2.6.1).
 - TMDb matching and metadata import (posters, backdrop, cast, genres, runtime, trailers).
 - Support for local directories and `rclone` remote folders.
-- Automatic addition to bouquets and categories based on genres and module settings.
+- Automatic addition to bouquets and categories based on genres (core's genre mapping, Settings → VOD Import).
 - Options: auto-upgrade, auto-encode (queue), extract metadata via ffprobe, subtitle handling.
 
 ## Entry points
@@ -24,12 +24,9 @@ The `watch` module scans configured folders (local paths or remote locations via
 ## Configuration and settings
 
 - Requires a valid TMDb API key in settings (`tmdb_api_key`).
-- Important settings available via `SettingsManager`:
-  - `percentage_match` — minimal similarity for TMDb match
-  - `parse_type` — `guessit` or `ptn` release parser
-  - `download_images` — whether to download poster/backdrop images
-  - `auto_encode` — queue imported items for encoding
-  - `thread_count`, `scan_seconds`, `max_items`, `max_genres`, `alternative_titles`, `fallback_parser`
+- Watch Settings (this module): `scan_seconds`, `thread_count`, `max_items`.
+- Core settings the import uses: `percentage_match`, `max_genres`, `alternative_titles`, `fallback_parser` and the genre mapping (Settings → VOD Import); `parse_type`, `tmdb_language`, `download_images` (Settings).
+- Per folder: `auto_encode`, `auto_upgrade`, categories, bouquets and the other folder options.
 
 ## Temporary files and caches
 

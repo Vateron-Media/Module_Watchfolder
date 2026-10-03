@@ -24,16 +24,8 @@
                 return /^\d*$/.test(value);
             };
             $('#scan_seconds').inputFilter(digits);
-            $('#percentage_match').inputFilter(digits);
             $('#max_items').inputFilter(digits);
             $('#thread_count').inputFilter(digits);
-
-            // Category / bouquet pickers (full-page tabs, no modal → no dropdownParent).
-            if ($.fn.select2) {
-                $('.select2').select2({
-                    width: '100%'
-                });
-            }
 
             // Save → post.php?action=settings_watch (mirrors legacy submitForm contract).
             $('#watch-settings-form').on('submit', function(e) {

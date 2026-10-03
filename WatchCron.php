@@ -4,6 +4,7 @@ namespace XcVm\Module\Watch;
 
 use XcVm\Core\Config\SettingsManager;
 use XcVm\Core\Process\Multithread;
+use XcVm\Domain\Stream\CategoryService;
 use XcVm\Domain\Stream\StreamRepository;
 
 /**
@@ -142,7 +143,7 @@ class WatchCron {
         $rScanOffset = intval($rSettings['scan_seconds'] ?? 0) ?: 3600;
         $rThreadCount = intval($rSettings['thread_count'] ?? 0) ?: 50;
         $rMaxFilesPerRun = intval($rSettings['max_items'] ?? 0);
-        $rWatchCategories = array(1 => WatchService::getWatchCategories(1), 2 => WatchService::getWatchCategories(2));
+        $rWatchCategories = array(1 => CategoryService::getGenreMap(1), 2 => CategoryService::getGenreMap(2));
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
         }

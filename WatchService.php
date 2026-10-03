@@ -24,32 +24,15 @@ class WatchService {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
 	/**
-	 * Update a genre's category_id/bouquets from the watch settings form data (movie or TV set).
+	 * Save the folder-scan settings. TMDb matching and the genre mapping are
+	 * core's (Settings → VOD Import).
 	 *
-	 * @param array $rData Full form data (also needs the bouquet_N / bouquettv_N fields).
-	 * @param string $rGenreKey Genre key prefix ('genre' or 'genretv').
-	 * @param string $rBouquetKey Bouquets key prefix ('bouquet' or 'bouquettv').
-	 * @param int $rType watch_categories type (1 = movie, 2 = series).
+	 * @param array $rData
+	 * @return array
 	 */
-	public static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
-		$db = self::db();
-		foreach ($rData as $rKey => $rValue) {
-			$rSplit = explode('_', $rKey);
-			if ($rSplit[0] == $rGenreKey) {
-				$rBouquets = isset($rData[$rBouquetKey . '_' . $rSplit[1]]) ? '[' . implode(',', array_map('intval', $rData[$rBouquetKey . '_' . $rSplit[1]])) . ']' : '[]';
-				$db->query('UPDATE `watch_categories` SET `category_id` = ?, `bouquets` = ? WHERE `genre_id` = ? AND `type` = ?;', $rValue, $rBouquets, $rSplit[1], $rType);
-			}
-		}
-	}
-
 	public static function editWatchSettings($rData) {
 		$db = self::db();
-		self::applyGenreCategoryUpdates($rData, 'genre', 'bouquet', 1);
-		self::applyGenreCategoryUpdates($rData, 'genretv', 'bouquettv', 2);
-
-		$altTitles = isset($rData['alternative_titles']);
-		$fallbackParser = isset($rData['fallback_parser']);
-		$db->query('UPDATE `settings` SET `percentage_match` = ?, `scan_seconds` = ?, `thread_count` = ?, `max_genres` = ?, `max_items` = ?, `alternative_titles` = ?, `fallback_parser` = ?;', $rData['percentage_match'], $rData['scan_seconds'], $rData['thread_count'], $rData['max_genres'], $rData['max_items'], $altTitles, $fallbackParser);
+		$db->query('UPDATE `settings` SET `scan_seconds` = ?, `thread_count` = ?, `max_items` = ?;', intval($rData['scan_seconds'] ?? 0), intval($rData['thread_count'] ?? 0), intval($rData['max_items'] ?? 0));
 
 		SettingsManager::clearCache();
 
@@ -116,22 +99,6 @@ class WatchService {
 		}
 
 		return $db->get_rows();
-	}
-
-	public static function getWatchCategories($rType = null) {
-		$db = self::db();
-		$rReturn = array();
-		if ($rType) {
-			$db->query('SELECT * FROM `watch_categories` WHERE `type` = ? ORDER BY `genre_id` ASC;', $rType);
-		} else {
-			$db->query('SELECT * FROM `watch_categories` ORDER BY `genre_id` ASC;');
-		}
-
-		foreach ($db->get_rows() as $rRow) {
-			$rReturn[$rRow['genre_id']] = $rRow;
-		}
-
-		return $rReturn;
 	}
 
 	public static function forceWatch($rServerID, $rWatchID) {
