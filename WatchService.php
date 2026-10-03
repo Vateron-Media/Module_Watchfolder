@@ -24,15 +24,15 @@ class WatchService {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
 	/**
-	 * Save the folder-scan settings. TMDb matching and the genre mapping are
-	 * core's (Settings → VOD Import).
+	 * Save the folder-scan settings. TMDb matching, parallel imports and the
+	 * genre mapping are core's (Settings → VOD Import).
 	 *
 	 * @param array $rData
 	 * @return array
 	 */
 	public static function editWatchSettings($rData) {
 		$db = self::db();
-		$db->query('UPDATE `settings` SET `scan_seconds` = ?, `thread_count` = ?, `max_items` = ?;', intval($rData['scan_seconds'] ?? 0), intval($rData['thread_count'] ?? 0), intval($rData['max_items'] ?? 0));
+		$db->query('UPDATE `settings` SET `scan_seconds` = ?, `max_items` = ?;', intval($rData['scan_seconds'] ?? 0), intval($rData['max_items'] ?? 0));
 
 		SettingsManager::clearCache();
 

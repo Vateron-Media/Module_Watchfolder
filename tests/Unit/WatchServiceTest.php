@@ -28,13 +28,13 @@ final class WatchServiceTest extends TestCase {
 
     public function testEditWatchSettingsSavesOnlyTheScanSettings(): void {
         $this->db->exec('CREATE TABLE settings (percentage_match INTEGER, scan_seconds INTEGER, thread_count INTEGER, max_items INTEGER);');
-        $this->db->query('INSERT INTO settings (percentage_match, scan_seconds, thread_count, max_items) VALUES (80, 0, 0, 0);');
+        $this->db->query('INSERT INTO settings (percentage_match, scan_seconds, thread_count, max_items) VALUES (80, 0, 4, 0);');
 
         $rResult = WatchService::editWatchSettings(array('scan_seconds' => '60', 'thread_count' => '2', 'max_items' => '10', 'percentage_match' => '10'));
 
         $this->assertSame(STATUS_SUCCESS, $rResult['status']);
         $this->db->query('SELECT * FROM settings;');
-        $this->assertSame(array(80, 60, 2, 10), array_map('intval', array_values($this->db->get_row())));
+        $this->assertSame(array(80, 60, 4, 10), array_map('intval', array_values($this->db->get_row())));
     }
 
     // --- a couple of the untouched-but-still-DB-critical methods -----------

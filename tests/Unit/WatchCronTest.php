@@ -158,4 +158,14 @@ final class WatchCronTest extends TestCase {
         file_put_contents($rPath, json_encode($rData));
         return $rPath;
     }
+
+    // --- scanSettings: the cron used to read them from globals nothing set ---
+
+    public function testScanSettingsReadTheSettingsWithTheirFallbacks(): void {
+        \XcVm\Core\Config\SettingsManager::set(array('thread_count' => 6));
+        $this->assertSame(array(120, 6, 25), WatchCron::scanSettings(array('scan_seconds' => '120', 'max_items' => '25')));
+
+        \XcVm\Core\Config\SettingsManager::set(array());
+        $this->assertSame(array(3600, 4, 0), WatchCron::scanSettings(array()), 'unset: hourly scans, 4 at a time, no limit');
+    }
 }

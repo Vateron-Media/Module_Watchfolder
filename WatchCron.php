@@ -4,7 +4,7 @@ namespace XcVm\Module\Watch;
 
 use XcVm\Core\Config\SettingsManager;
 use XcVm\Core\Process\Multithread;
-use XcVm\Domain\Stream\CategoryService;
+use XcVm\Domain\Vod\VodItemImporter;
 use XcVm\Domain\Stream\StreamRepository;
 
 /**
@@ -127,6 +127,18 @@ class WatchCron {
     }
 
     /**
+     * Scan interval (seconds), parallel imports and files per folder per scan
+     * (0 = no limit). The interval falls back to the original XUI's 3600; the
+     * parallel imports are core's setting (Settings → VOD Import).
+     *
+     * @param array $rSettings
+     * @return int[] [scan seconds, threads, max items]
+     */
+    public static function scanSettings(array $rSettings) {
+        return array(intval($rSettings['scan_seconds'] ?? 0) ?: 3600, VodItemImporter::importThreads(), intval($rSettings['max_items'] ?? 0));
+    }
+
+    /**
      * Run the watch cron.
      *
      * Scans configured watch folders, prepares import jobs for newly
@@ -139,11 +151,7 @@ class WatchCron {
     public static function run($rForce) {
         $db = self::db();
         $rSettings = SettingsManager::getAll();
-        // Fallbacks match the original XUI watch cron.
-        $rScanOffset = intval($rSettings['scan_seconds'] ?? 0) ?: 3600;
-        $rThreadCount = intval($rSettings['thread_count'] ?? 0) ?: 50;
-        $rMaxFilesPerRun = intval($rSettings['max_items'] ?? 0);
-        $rWatchCategories = array(1 => CategoryService::getGenreMap(1), 2 => CategoryService::getGenreMap(2));
+        list($rScanOffset, $rThreadCount, $rMaxFilesPerRun) = self::scanSettings($rSettings);
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
         }
@@ -252,7 +260,7 @@ class WatchCron {
                                 }
                             }
                         }
-                        $rThreadData[] = array('type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
+                        $rThreadData[] = array('type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
                         if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
                             break;
                         }
@@ -262,20 +270,12 @@ class WatchCron {
             if (count($rThreadData) > 0) {
                 echo 'Scan complete! Adding ' . count($rThreadData) . ' files...' . "\n";
             }
-            $cacheDataKey = array();
+            $rCommands = array();
             foreach ($rThreadData as $rData) {
-                $rCommand = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php vod_import_item "' . base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)) . '"';
-                $cacheDataKey[] = $rCommand;
+                $rCommands[] = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php vod_import_item ' . escapeshellarg(base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)));
             }
             $db->close_mysql();
-            if ($rThreadCount <= 1) {
-                foreach ($cacheDataKey as $rCommand) {
-                    shell_exec($rCommand);
-                }
-            } else {
-                $cacheMetadataKey = new Multithread($cacheDataKey, $rThreadCount);
-                $cacheMetadataKey->run();
-            }
+            Multithread::pool($rCommands, $rThreadCount);
             $db->db_connect();
             if (!empty($rRow['delete_missing'])) {
                 self::cleanupMissing($rRow, $rFiles);

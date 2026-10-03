@@ -24,8 +24,8 @@ The `watch` module scans configured folders (local paths or remote locations via
 ## Configuration and settings
 
 - Requires a valid TMDb API key in settings (`tmdb_api_key`).
-- Watch Settings (this module): `scan_seconds`, `thread_count`, `max_items`.
-- Core settings the import uses: `percentage_match`, `max_genres`, `alternative_titles`, `fallback_parser` and the genre mapping (Settings → VOD Import); `parse_type`, `tmdb_language`, `download_images` (Settings).
+- Watch Settings (this module): `scan_seconds`, `max_items`.
+- Core settings the import uses: `thread_count` (parallel imports), `percentage_match`, `max_genres`, `alternative_titles`, `fallback_parser` and the genre mapping (Settings → VOD Import); `parse_type`, `tmdb_language`, `download_images` (Settings).
 - Per folder: `auto_encode`, `auto_upgrade`, categories, bouquets and the other folder options.
 
 ## Temporary files and caches

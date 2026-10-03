@@ -25,7 +25,6 @@
             };
             $('#scan_seconds').inputFilter(digits);
             $('#max_items').inputFilter(digits);
-            $('#thread_count').inputFilter(digits);
 
             // Save → post.php?action=settings_watch (mirrors legacy submitForm contract).
             $('#watch-settings-form').on('submit', function(e) {
