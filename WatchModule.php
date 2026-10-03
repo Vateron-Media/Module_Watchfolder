@@ -8,7 +8,9 @@ use XcVm\Core\Events\ListensTo;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
 use XcVm\Core\Events\Vod\VodImportedEvent;
 use XcVm\Core\Events\Vod\VodImportResultEvent;
+use XcVm\Core\Container\ServiceContainer;
 use XcVm\Core\Http\Router;
+use XcVm\Core\Module\AdminApiRegistry;
 use XcVm\Core\Module\BaseModule;
 use XcVm\Core\Module\NavbarItem;
 use XcVm\Core\Module\NavbarRegistry;
@@ -41,6 +43,7 @@ use XcVm\Core\Module\TopbarRegistry;
  *     - settings/watch — watch settings (settings_watch)
  *
  *   API actions:
+ *     - settings_watch_save / watch_folder_save — the two forms (POST only)
  *     - enable_watch   — enable all folders
  *     - disable_watch  — disable all folders
  *     - kill_watch     — kill processes
@@ -100,6 +103,21 @@ class WatchModule extends BaseModule {
         WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId);
     }
 
+    /**
+     * The module's Admin REST API actions (core no longer has a case for them).
+     */
+    public function boot(ServiceContainer $container): void {
+        AdminApiRegistry::add('get_watch_folders', static fn(array $rData): array => array('status' => STATUS_SUCCESS, 'data' => WatchService::getWatchFolders()), 'rows');
+        AdminApiRegistry::add('get_watch_folder', static fn(array $rData): array => WatchService::apiGetFolder((int) ($rData['id'] ?? 0)), 'row');
+        AdminApiRegistry::add('create_watch_folder', static fn(array $rData): array => WatchService::apiSaveFolder($rData));
+        AdminApiRegistry::add('edit_watch_folder', static fn(array $rData): array => WatchService::apiSaveFolder($rData, (int) ($rData['id'] ?? 0)));
+        AdminApiRegistry::add('delete_watch_folder', static fn(array $rData): array => WatchService::apiDeleteFolder((int) ($rData['id'] ?? 0)));
+        AdminApiRegistry::add('reload_watch_folder', static function (array $rData): array {
+            WatchService::forceWatch($rData['server_id'] ?? SERVER_ID, $rData['id'] ?? 0);
+            return array('status' => STATUS_SUCCESS);
+        });
+    }
+
     public function registerRoutes(Router $router): void {
         $router->group('watch', function (Router $r) {
             $r->get('', [WatchController::class, 'index'], [
@@ -117,6 +135,12 @@ class WatchModule extends BaseModule {
             'permission' => ['adv', 'folder_watch_settings'],
         ]);
 
+        $router->api('settings_watch_save', [WatchController::class, 'apiSaveSettings'], [
+            'permission' => ['adv', 'folder_watch_settings'],
+        ]);
+        $router->api('watch_folder_save', [WatchController::class, 'apiSaveFolder'], [
+            'permission' => ['adv', 'folder_watch_add'],
+        ]);
         $router->api('enable_watch', [WatchController::class, 'apiEnable'], [
             'permission' => ['adv', 'folder_watch_settings'],
         ]);

@@ -43,3 +43,5 @@ foreach (array(WATCH_TMP_PATH, CONFIG_PATH, CACHE_TMP_PATH) as $rDir) {
 
 require_once dirname(__DIR__) . '/WatchCron.php';
 require_once dirname(__DIR__) . '/WatchService.php';
+require_once dirname(__DIR__) . '/WatchController.php';
+require_once dirname(__DIR__) . '/WatchModule.php';

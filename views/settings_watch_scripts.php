@@ -26,7 +26,7 @@
             $('#scan_seconds').inputFilter(digits);
             $('#max_items').inputFilter(digits);
 
-            // Save → post.php?action=settings_watch (mirrors legacy submitForm contract).
+            // Save → the module's settings_watch_save action (same JSON contract as post.php had).
             $('#watch-settings-form').on('submit', function(e) {
                 e.preventDefault();
                 var btn = document.getElementById('save-settings');
@@ -35,7 +35,7 @@
                 }
                 var fd = new FormData(this);
                 fd.append('submit_settings', '1');
-                fetch('post.php?action=settings_watch', {
+                fetch('./api?action=settings_watch_save', {
                         method: 'POST',
                         body: fd,
                         headers: {

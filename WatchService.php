@@ -90,6 +90,50 @@ class WatchService {
 		return array('status' => STATUS_FAILURE, 'data' => $rData);
 	}
 
+	/**
+	 * Admin API: one folder.
+	 *
+	 * @param int $rID
+	 * @return array
+	 */
+	public static function apiGetFolder(int $rID) {
+		$rFolder = StreamRepository::getWatchFolder($rID);
+		return $rFolder ? array('status' => STATUS_SUCCESS, 'data' => $rFolder) : array('status' => STATUS_FAILURE);
+	}
+
+	/**
+	 * Admin API: create a folder, or edit the one `$rID` names; replies with
+	 * the stored folder.
+	 *
+	 * @param array    $rData
+	 * @param int|null $rID
+	 * @return array
+	 */
+	public static function apiSaveFolder(array $rData, ?int $rID = null) {
+		unset($rData['edit'], $rData['id']);
+		if ($rID !== null) {
+			if (!StreamRepository::getWatchFolder($rID)) {
+				return array('status' => STATUS_FAILURE);
+			}
+			$rData['edit'] = $rID;
+		}
+		$rReturn = self::processWatchFolder($rData);
+		if (isset($rReturn['data']['insert_id'])) {
+			$rReturn['data'] = self::apiGetFolder((int) $rReturn['data']['insert_id'])['data'] ?? null;
+		}
+		return $rReturn;
+	}
+
+	/**
+	 * Admin API: delete a folder.
+	 *
+	 * @param int $rID
+	 * @return array
+	 */
+	public static function apiDeleteFolder(int $rID) {
+		return array('status' => (StreamRepository::getWatchFolder($rID) && StreamRepository::deleteWatchFolder($rID)) ? STATUS_SUCCESS : STATUS_FAILURE);
+	}
+
 	public static function getWatchFolders($rType = null) {
 		$db = self::db();
 		if ($rType) {

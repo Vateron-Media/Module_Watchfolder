@@ -4,7 +4,7 @@
  * Folder Watch settings (Bootstrap 5, new-UI): how often and how hard folders
  * are scanned. TMDb matching and the genre → category/bouquet mapping are core
  * settings (Settings → VOD Import). Body-only view: the controller renders the unified admin shell around it and
- * includes settings_watch_scripts.php afterwards. Posts to post.php?action=settings_watch.
+ * includes settings_watch_scripts.php afterwards. Posts to api?action=settings_watch_save.
  */
 
 ?>
@@ -22,7 +22,7 @@
 
 <div class="card">
     <div class="card-body">
-        <form id="watch-settings-form" method="POST" action="post.php?action=settings_watch" autocomplete="off">
+        <form id="watch-settings-form" method="POST" action="api?action=settings_watch_save" autocomplete="off">
             <div class="row mb-6">
                 <div class="col-md-6">
                     <label class="form-label" for="scan_seconds">Scan Frequency <i title="Scan a folder every X seconds." class="icon-base ti tabler-help-circle text-secondary"></i></label>

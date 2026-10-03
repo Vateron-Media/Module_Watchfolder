@@ -91,4 +91,27 @@ final class WatchServiceTest extends TestCase {
         $this->db->query('SELECT COUNT(*) AS `count` FROM `watch_logs`;');
         $this->assertSame(0, (int) $this->db->get_col());
     }
+
+    // --- Admin API actions (registered from WatchModule::boot()) -------------
+
+    public function testBootRegistersTheFolderActionsOfTheAdminApi(): void {
+        \XcVm\Core\Module\AdminApiRegistry::reset();
+        (new \XcVm\Module\Watch\WatchModule())->boot(\XcVm\Core\Container\ServiceContainer::getInstance());
+
+        foreach (array('get_watch_folders', 'get_watch_folder', 'create_watch_folder', 'edit_watch_folder', 'delete_watch_folder', 'reload_watch_folder') as $rAction) {
+            $this->assertNotNull(\XcVm\Core\Module\AdminApiRegistry::get($rAction), $rAction);
+        }
+        \XcVm\Core\Module\AdminApiRegistry::reset();
+    }
+
+    public function testApiGetAndDeleteFolder(): void {
+        \XcVm\Domain\Stream\StreamRepository::setDb($this->db);
+        $this->db->query('INSERT INTO watch_folders (id, bouquets, fb_bouquets) VALUES (3, ?, ?);', '[]', '[]');
+
+        $this->assertSame(3, (int) WatchService::apiGetFolder(3)['data']['id']);
+        $this->assertSame(array('status' => STATUS_FAILURE), WatchService::apiGetFolder(4));
+        $this->assertSame(array('status' => STATUS_FAILURE), WatchService::apiSaveFolder(array(), 4), 'editing a missing folder');
+        $this->assertSame(array('status' => STATUS_SUCCESS), WatchService::apiDeleteFolder(3));
+        $this->assertSame(array('status' => STATUS_FAILURE), WatchService::apiDeleteFolder(3));
+    }
 }
