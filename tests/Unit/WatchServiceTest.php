@@ -142,6 +142,17 @@ final class WatchServiceTest extends TestCase {
         $this->assertSame('42', (string) $rRow['stream_id']);
     }
 
+    public function testLogImportResultReplacesTheFilesEarlierRow(): void {
+        WatchService::logImportResult(2, 1, '/media/a&b.mkv', 4);
+        WatchService::logImportResult(2, 1, '/media/a&b.mkv', 1, 42);
+        WatchService::logImportResult(2, 1, '/media/other.mkv', 3);
+
+        $this->db->query('SELECT `filename`, `status`, `stream_id` FROM `watch_logs` ORDER BY `id` ASC;');
+        $rRows = $this->db->get_rows();
+        $this->assertCount(2, $rRows);
+        $this->assertSame(array('/media/a&amp;b.mkv', 1, 42), array($rRows[0]['filename'], (int) $rRows[0]['status'], (int) $rRows[0]['stream_id']));
+    }
+
     public function testMarkImportedIsANoOpForAnEmptyPath(): void {
         $this->db->query("INSERT INTO watch_logs (type, server_id, filename, status, stream_id) VALUES (1, 1, 'movie.mkv', 4, 0);");
 

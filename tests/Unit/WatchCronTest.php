@@ -57,7 +57,7 @@ final class WatchCronTest extends TestCase {
     // --- cleanupMissing: regression for the type=3/type=5 mismatch bug -----
 
     public function testCleanupMissingDeletesASeriesStreamWhoseFileIsGone(): void {
-        // Series episodes are stored with streams.type = 5 (see WatchItem's
+        // Series episodes are stored with streams.type = 5 (see core VodItemImporter's
         // array('movie' => 2, 'series' => 5) mapping). cleanupMissing() used
         // to filter on type = 3, so a series folder's delete_missing pass
         // never matched anything at all — this exercises the real method.

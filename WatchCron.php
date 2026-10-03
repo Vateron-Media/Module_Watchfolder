@@ -11,7 +11,7 @@ use XcVm\Domain\Stream\StreamRepository;
  *
  * This class implements the scheduled job that scans configured watch
  * directories (local or rclone), detects new media files, prepares
- * work items and dispatches `watch_item` console jobs to import or
+ * work items and dispatches core `vod_import_item` console jobs to import or
  * update streams and bouquets.
  *
  * @package XC_VM_Module_Watch
@@ -284,7 +284,7 @@ class WatchCron {
             }
             $cacheDataKey = array();
             foreach ($rThreadData as $rData) {
-                $rCommand = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php watch_item "' . base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)) . '"';
+                $rCommand = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php vod_import_item "' . base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)) . '"';
                 $cacheDataKey[] = $rCommand;
             }
             $db->close_mysql();

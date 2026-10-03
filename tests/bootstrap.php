@@ -45,9 +45,5 @@ foreach (array(WATCH_TMP_PATH, CONFIG_PATH, CACHE_TMP_PATH) as $rDir) {
 // wrappers (plain array wrappers, no network access from merely loading the file).
 require_once MAIN_HOME . 'Infrastructure/Tmdb/lib/TmdbClient.php';
 
-require_once __DIR__ . '/Support/FakeTmdbClient.php';
-
-require_once dirname(__DIR__) . '/WatchItemHalt.php';
-require_once dirname(__DIR__) . '/WatchItem.php';
 require_once dirname(__DIR__) . '/WatchCron.php';
 require_once dirname(__DIR__) . '/WatchService.php';

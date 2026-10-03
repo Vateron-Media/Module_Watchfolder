@@ -8,6 +8,7 @@ use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
 use XcVm\Core\Events\ListensTo;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
 use XcVm\Core\Events\Vod\VodImportedEvent;
+use XcVm\Core\Events\Vod\VodImportResultEvent;
 use XcVm\Core\Http\Router;
 use XcVm\Core\Module\BaseModule;
 use XcVm\Core\Module\NavbarItem;
@@ -65,7 +66,7 @@ class WatchModule extends BaseModule {
     }
 
     public function getVersion(): string {
-        return '1.0.5';
+        return '1.1.0';
     }
 
     /**
@@ -93,12 +94,20 @@ class WatchModule extends BaseModule {
         WatchService::markImported($rEvent->streamId, $rEvent->sourcePath, $rEvent->type);
     }
 
+    /**
+     * Log each file core's vod_import_item processed (folder scans and the
+     * manual Movies/Series import alike) to watch_logs.
+     */
+    #[ListensTo(VodImportResultEvent::class)]
+    public function onVodImportResult(VodImportResultEvent $rEvent): void {
+        WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId);
+    }
+
     public function boot(ServiceContainer $container): void {
         $db = $container->get('db');
         WatchService::setDb($db);
         RecordingService::setDb($db);
         WatchCron::setDb($db);
-        WatchItem::setDb($db);
 
         $container->set('watch.service', 'WatchService');
         $container->set('watch.recording', 'RecordingService');
@@ -148,7 +157,6 @@ class WatchModule extends BaseModule {
 
     public function registerCommands(CommandRegistry $registry): void {
         $registry->register(new WatchCronJob());
-        $registry->register(new WatchItemCommand());
     }
 
     public function registerNavbar(NavbarRegistry $registry): void {

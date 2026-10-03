@@ -9,7 +9,7 @@ The `watch` module scans configured folders (local paths or remote locations via
 ## Key features
 
 - Periodic scanning via CLI cron command `cron:watch`.
-- Per-file processing performed by the `watch_item` command.
+- Per-file processing (TMDb match and insert) performed by core's `vod_import_item` command; the module logs each outcome to `watch_logs` (requires core >= 2.6.1).
 - TMDb matching and metadata import (posters, backdrop, cast, genres, runtime, trailers).
 - Support for local directories and `rclone` remote folders.
 - Automatic addition to bouquets and categories based on genres and module settings.
@@ -18,7 +18,7 @@ The `watch` module scans configured folders (local paths or remote locations via
 ## Entry points
 
 - CLI: `php console.php cron:watch` — run scheduled scan. Optional folder ID: `php console.php cron:watch <folder_id>` to force a single folder.
-- CLI: `php console.php watch_item "<base64(json)>"` — process a single payload (used by cron to dispatch jobs).
+- CLI (core): `php console.php vod_import_item "<base64(json)>"` — process a single payload (used by cron to dispatch jobs).
 - HTTP API actions: `enable_watch`, `disable_watch`, `kill_watch`, `folder` (delete/force) exposed by the module router.
 
 ## Configuration and settings
@@ -44,4 +44,4 @@ The `watch` module scans configured folders (local paths or remote locations via
 - The module integrates with other services: `StreamProcess`, `ImageUtils`, and `TMDB` client libraries.
 - Be cautious when enabling `auto_upgrade` and `auto_encode`; they may modify existing streams or enqueue heavy encoding jobs.
 
-For details, inspect the module source files in this folder: `WatchCron.php`, `WatchCronJob.php`, `WatchItem.php`, `WatchItemCommand.php`, `WatchService.php`, and `WatchController.php`.
+For details, inspect the module source files in this folder: `WatchCron.php`, `WatchCronJob.php`, `WatchService.php`, and `WatchController.php`; per-file import lives in core (`Domain/Vod/VodItemImporter.php`).

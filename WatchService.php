@@ -314,6 +314,23 @@ class WatchService {
 	}
 
 	/**
+	 * Record a file's import outcome, replacing any earlier row for that file.
+	 *
+	 * @param int    $rType     1 = movie, 2 = series.
+	 * @param int    $rServerID
+	 * @param string $rFilename Raw path or URL (stored HTML-escaped, as the log view expects).
+	 * @param int    $rStatus   VodImportResultEvent::STATUS_*
+	 * @param int    $rStreamID
+	 * @return void
+	 */
+	public static function logImportResult($rType, $rServerID, $rFilename, $rStatus, $rStreamID = 0) {
+		$db = self::db();
+		$rFilename = htmlspecialchars((string) $rFilename, ENT_QUOTES, 'UTF-8');
+		$db->query('DELETE FROM `watch_logs` WHERE `filename` = ? AND `type` = ? AND `server_id` = ?;', $rFilename, (int) $rType, (int) $rServerID);
+		$db->query('INSERT INTO `watch_logs`(`type`, `server_id`, `filename`, `status`, `stream_id`) VALUES(?, ?, ?, ?, ?);', (int) $rType, (int) $rServerID, $rFilename, (int) $rStatus, (int) $rStreamID);
+	}
+
+	/**
 	 * Truncate all folder-watch logs. Backs the module's "Clear Watch Logs"
 	 * Quick Tool (QuickToolsProviderInterface), moved out of core post.php.
 	 *
