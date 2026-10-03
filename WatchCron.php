@@ -158,11 +158,11 @@ class WatchCron {
      */
     public static function run($rForce) {
         $db = self::db();
-        global $rThreadCount;
-        global $rScanOffset;
-        global $F7fa29461a8a5ee2; // max_items — set by an external bootstrap; do not rename
-        $rMaxFilesPerRun = $F7fa29461a8a5ee2;
         $rSettings = SettingsManager::getAll();
+        // Fallbacks match the original XUI watch cron.
+        $rScanOffset = intval($rSettings['scan_seconds'] ?? 0) ?: 3600;
+        $rThreadCount = intval($rSettings['thread_count'] ?? 0) ?: 50;
+        $rMaxFilesPerRun = intval($rSettings['max_items'] ?? 0);
         $rWatchCategories = array(1 => self::getWatchCategories(1), 2 => self::getWatchCategories(2));
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
@@ -272,7 +272,7 @@ class WatchCron {
                                 }
                             }
                         }
-                        $rThreadData[] = array('folder_id' => $rRow['id'], 'type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
+                        $rThreadData[] = array('folder_id' => $rRow['id'], 'type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
                         if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
                             break;
                         }

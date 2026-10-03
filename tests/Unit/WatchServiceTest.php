@@ -153,6 +153,16 @@ final class WatchServiceTest extends TestCase {
         $this->assertSame(array('/media/a&amp;b.mkv', 1, 42), array($rRows[0]['filename'], (int) $rRows[0]['status'], (int) $rRows[0]['stream_id']));
     }
 
+    public function testMarkImportedFindsARowLoggedWithSpecialCharacters(): void {
+        WatchService::logImportResult(1, 1, "/media/Tom & Jerry's.mkv", 4);
+
+        WatchService::markImported(42, "/media/Tom & Jerry's.mkv", 1);
+
+        $this->db->query('SELECT `status`, `stream_id` FROM `watch_logs`;');
+        $rRow = $this->db->get_row();
+        $this->assertSame(array(1, 42), array((int) $rRow['status'], (int) $rRow['stream_id']));
+    }
+
     public function testMarkImportedIsANoOpForAnEmptyPath(): void {
         $this->db->query("INSERT INTO watch_logs (type, server_id, filename, status, stream_id) VALUES (1, 1, 'movie.mkv', 4, 0);");
 

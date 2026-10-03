@@ -149,7 +149,7 @@ class WatchService {
 
 	public static function killWatch() {
 		$db = self::db();
-		$db->query("SELECT DISTINCT(`server_id`) AS `server_id` FROM `watch_folders` WHERE `active` = 11 AND `type` <> 'plex';");
+		$db->query("SELECT DISTINCT(`server_id`) AS `server_id` FROM `watch_folders` WHERE `type` <> 'plex';");
 		foreach ($db->get_rows() as $rRow) {
 			if (ServerRepository::getAll()[$rRow['server_id']]['server_online']) {
 				ApiClient::systemRequest($rRow['server_id'], array('action' => 'kill_watch'));
@@ -310,7 +310,8 @@ class WatchService {
 			return;
 		}
 		$db = self::db();
-		$db->query('UPDATE `watch_logs` SET `status` = 1, `stream_id` = ? WHERE `filename` = ? AND `type` = ?;', (int) $rStreamID, $rPath, (int) $rType);
+		// logImportResult() stores filenames HTML-escaped.
+		$db->query('UPDATE `watch_logs` SET `status` = 1, `stream_id` = ? WHERE `filename` = ? AND `type` = ?;', (int) $rStreamID, htmlspecialchars((string) $rPath, ENT_QUOTES, 'UTF-8'), (int) $rType);
 	}
 
 	/**
