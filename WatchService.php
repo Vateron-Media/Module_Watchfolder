@@ -157,30 +157,6 @@ class WatchService {
 		return true;
 	}
 
-	public static function getRecordings() {
-		$db = self::db();
-		$rRecordings = array();
-		$db->query('SELECT * FROM `recordings` ORDER BY `id` DESC;');
-		foreach ($db->get_rows() as $rRow) {
-			$rRecordings[] = $rRow;
-		}
-		return $rRecordings;
-	}
-
-	public static function deleteRecording($rID) {
-		$db = self::db();
-		$db->query('SELECT `created_id`, `source_id` FROM `recordings` WHERE `id` = ?;', $rID);
-		if ($db->num_rows() > 0) {
-			$rRecording = $db->get_row();
-			if ($rRecording['created_id']) {
-				StreamRepository::deleteStream($rRecording['created_id'], $rRecording['source_id'], true, true);
-			}
-			shell_exec("kill -9 `ps -ef | grep 'Record[" . intval($rID) . "]' | grep -v grep | awk '{print $2}'`");
-			$db->query('DELETE FROM `recordings` WHERE `id` = ?;', $rID);
-		}
-		return true;
-	}
-
 	/**
 	 * Remove a deleted bouquet from every watch folder that referenced it.
 	 *

@@ -20,7 +20,7 @@ use XcVm\Core\Module\TopbarRegistry;
 /**
  * Watch Module
  *
- * Watch Folder / Recording module: scans folders and hands each new file to
+ * Watch Folder module: scans folders and hands each new file to
  * core's `vod_import_item`; logs the results. Registers routes, API actions,
  * the `cron:watch` job and event listeners.
  *
@@ -30,7 +30,6 @@ use XcVm\Core\Module\TopbarRegistry;
  *
  *   Services:
  *     - WatchService    — Watch Folder CRUD, settings, enable/disable/kill
- *     - RecordingService — recording (DVR) scheduling
  *
  *   Controller:
  *     - WatchController — HTTP request and API handling
@@ -48,7 +47,6 @@ use XcVm\Core\Module\TopbarRegistry;
  *     - folder         — delete/run a folder
  *
  * @see WatchService
- * @see RecordingService
  * @see WatchController
  *
  * @package XC_VM_Module_Watch
