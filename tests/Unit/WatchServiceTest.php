@@ -29,42 +29,6 @@ final class WatchServiceTest extends TestCase {
         WatchService::setDb($this->db);
     }
 
-    private function categoryRows(): array {
-        $this->db->query('SELECT * FROM `watch_categories` ORDER BY `id` ASC;');
-        return $this->db->get_rows();
-    }
-
-    // --- insertMissingGenre (dedup of the 4x near-identical INSERT) --------
-
-    public function testInsertMissingGenreInsertsWhenAbsent(): void {
-        WatchService::insertMissingGenre(28, 'Action', 1, array(1 => array(), 2 => array()));
-
-        $rRows = $this->categoryRows();
-        $this->assertCount(1, $rRows);
-        $this->assertSame('1', (string) $rRows[0]['type']);
-        $this->assertSame('28', (string) $rRows[0]['genre_id']);
-        $this->assertSame('Action', $rRows[0]['genre']);
-        $this->assertSame('0', (string) $rRows[0]['category_id']);
-        $this->assertSame('[]', $rRows[0]['bouquets']);
-    }
-
-    public function testInsertMissingGenreIsANoOpWhenAlreadyPresent(): void {
-        WatchService::insertMissingGenre(28, 'Action', 1, array(1 => array(28), 2 => array()));
-
-        $this->assertCount(0, $this->categoryRows());
-    }
-
-    public function testInsertMissingGenreTracksTypesIndependently(): void {
-        // The same genre id can be missing for movies (type 1) but already
-        // present for series (type 2) — each call only checks its own type.
-        WatchService::insertMissingGenre(28, 'Action', 1, array(1 => array(), 2 => array(28)));
-        WatchService::insertMissingGenre(28, 'Action', 2, array(1 => array(), 2 => array(28)));
-
-        $rRows = $this->categoryRows();
-        $this->assertCount(1, $rRows);
-        $this->assertSame('1', (string) $rRows[0]['type']);
-    }
-
     // --- applyGenreCategoryUpdates (dedup of the genre/genretv form loops) --
 
     public function testApplyGenreCategoryUpdatesWritesCategoryAndBouquets(): void {

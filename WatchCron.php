@@ -40,27 +40,6 @@ class WatchCron {
 
 
     /**
-    * Get watch categories from the database.
-    *
-    * @param int|null $rType Category type (1 = movie, 2 = series). When null
-    *                      returns all categories.
-    * @return array Associative array keyed by `genre_id` of category rows.
-     */
-    public static function getWatchCategories($rType = null) {
-        $db = self::db();
-        $rReturn = array();
-        if ($rType) {
-            $db->query('SELECT * FROM `watch_categories` WHERE `type` = ? ORDER BY `genre_id` ASC;', $rType);
-        } else {
-            $db->query('SELECT * FROM `watch_categories` ORDER BY `genre_id` ASC;');
-        }
-        foreach ($db->get_rows() as $rRow) {
-            $rReturn[$rRow['genre_id']] = $rRow;
-        }
-        return $rReturn;
-    }
-
-    /**
         * Get bouquet by its ID.
         *
         * @param int $rID Bouquet identifier.
@@ -163,7 +142,7 @@ class WatchCron {
         $rScanOffset = intval($rSettings['scan_seconds'] ?? 0) ?: 3600;
         $rThreadCount = intval($rSettings['thread_count'] ?? 0) ?: 50;
         $rMaxFilesPerRun = intval($rSettings['max_items'] ?? 0);
-        $rWatchCategories = array(1 => self::getWatchCategories(1), 2 => self::getWatchCategories(2));
+        $rWatchCategories = array(1 => WatchService::getWatchCategories(1), 2 => WatchService::getWatchCategories(2));
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
         }
@@ -272,7 +251,7 @@ class WatchCron {
                                 }
                             }
                         }
-                        $rThreadData[] = array('folder_id' => $rRow['id'], 'type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
+                        $rThreadData[] = array('type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'watch_categories' => $rWatchCategories, 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
                         if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
                             break;
                         }

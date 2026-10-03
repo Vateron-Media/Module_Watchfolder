@@ -3,7 +3,6 @@
 namespace XcVm\Module\Watch;
 
 use XcVm\Cli\CommandRegistry;
-use XcVm\Core\Container\ServiceContainer;
 use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
 use XcVm\Core\Events\ListensTo;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
@@ -21,8 +20,9 @@ use XcVm\Core\Module\TopbarRegistry;
 /**
  * Watch Module
  *
- * Watch Folder / Recording module.
- * Registers services, routes, API actions and cron jobs.
+ * Watch Folder / Recording module: scans folders and hands each new file to
+ * core's `vod_import_item`; logs the results. Registers routes, API actions,
+ * the `cron:watch` job and event listeners.
  *
  * ──────────────────────────────────────────────────────────────────
  * What it includes:
@@ -38,9 +38,8 @@ use XcVm\Core\Module\TopbarRegistry;
  *   Pages:
  *     - watch          — folder list
  *     - watch/add      — add/edit
- *     - watch/settings — watch settings (settings_watch)
  *     - watch/output   — logs (watch_output)
- *     - watch/record   — recording schedule (record)
+ *     - settings/watch — watch settings (settings_watch)
  *
  *   API actions:
  *     - enable_watch   — enable all folders
@@ -101,19 +100,6 @@ class WatchModule extends BaseModule {
     #[ListensTo(VodImportResultEvent::class)]
     public function onVodImportResult(VodImportResultEvent $rEvent): void {
         WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId);
-    }
-
-    public function boot(ServiceContainer $container): void {
-        $db = $container->get('db');
-        WatchService::setDb($db);
-        RecordingService::setDb($db);
-        WatchCron::setDb($db);
-
-        $container->set('watch.service', 'WatchService');
-        $container->set('watch.recording', 'RecordingService');
-        $container->set('watch.controller', function ($c) {
-            return new WatchController();
-        });
     }
 
     public function registerRoutes(Router $router): void {

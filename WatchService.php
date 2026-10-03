@@ -8,7 +8,6 @@ use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
 use XcVm\Domain\Stream\StreamRepository;
-use XcVm\Infrastructure\Tmdb\TmdbApiService;
 
 /**
  * WatchService — watch service
@@ -180,65 +179,6 @@ class WatchService {
 			$db->query('DELETE FROM `recordings` WHERE `id` = ?;', $rID);
 		}
 		return true;
-	}
-
-	/**
-	 * Insert a genre into watch_categories for the given type, if it isn't there yet.
-	 *
-	 * @param int $rGenreID TMDb genre id.
-	 * @param string $rGenreName TMDb genre name.
-	 * @param int $rType watch_categories type (1 = movie, 2 = series).
-	 * @param array $rCurrentCats [type => [genre_id, ...]] — genres already present.
-	 */
-	public static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
-		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
-			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
-		}
-	}
-
-	/**
-	 * Sync TMDb movie/TV genres into the watch_categories table (types 1 & 2).
-	 *
-	 * Lives in the watch module because watch owns the watch_categories table
-	 * (previously TMDbService::updateCategories() in the core VOD domain).
-	 * Pulls the genre lists from the bundled TMDb client and inserts any that
-	 * are missing, de-duplicating existing rows by genre_id.
-	 *
-	 * @return void
-	 */
-
-	public static function updateCategories() {
-		$db = self::db();
-		$rTMDB = TmdbApiService::createClient(SettingsManager::getAll()['tmdb_api_key']);
-
-		$rCurrentCats = array(1 => array(), 2 => array());
-		$db->query('SELECT `id`, `type`, `genre_id` FROM `watch_categories`;');
-
-		if ($db->num_rows() > 0) {
-			foreach ($db->get_rows() as $rRow) {
-				if (array_key_exists($rRow['type'], $rCurrentCats)) {
-
-					if (in_array($rRow['genre_id'], $rCurrentCats[$rRow['type']])) {
-						$db->query('DELETE FROM `watch_categories` WHERE `id` = ?;', $rRow['id']);
-					}
-					$rCurrentCats[$rRow['type']][] = $rRow['genre_id'];
-				}
-			}
-		}
-
-		$rMovieGenres = $rTMDB->getMovieGenres();
-
-		foreach ($rMovieGenres as $rMovieGenre) {
-			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 1, $rCurrentCats);
-			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 2, $rCurrentCats);
-		}
-
-		$rTVGenres = $rTMDB->getTVGenres();
-
-		foreach ($rTVGenres as $rTVGenre) {
-			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 1, $rCurrentCats);
-			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 2, $rCurrentCats);
-		}
 	}
 
 	/**
