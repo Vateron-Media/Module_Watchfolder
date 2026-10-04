@@ -7,8 +7,6 @@ use XcVm\Core\Database\QueryHelper;
 use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
-use XcVm\Domain\Stream\StreamRepository;
-use XcVm\Infrastructure\Tmdb\TmdbApiService;
 
 /**
  * WatchService — watch service
@@ -25,32 +23,15 @@ class WatchService {
     use \XcVm\Infrastructure\Database\DatabaseAware;
 
 	/**
-	 * Update a genre's category_id/bouquets from the watch settings form data (movie or TV set).
+	 * Save the folder-scan settings. TMDb matching, parallel imports and the
+	 * genre mapping are core's (Settings → VOD Import).
 	 *
-	 * @param array $rData Full form data (also needs the bouquet_N / bouquettv_N fields).
-	 * @param string $rGenreKey Genre key prefix ('genre' or 'genretv').
-	 * @param string $rBouquetKey Bouquets key prefix ('bouquet' or 'bouquettv').
-	 * @param int $rType watch_categories type (1 = movie, 2 = series).
+	 * @param array $rData
+	 * @return array
 	 */
-	public static function applyGenreCategoryUpdates(array $rData, string $rGenreKey, string $rBouquetKey, int $rType) {
-		$db = self::db();
-		foreach ($rData as $rKey => $rValue) {
-			$rSplit = explode('_', $rKey);
-			if ($rSplit[0] == $rGenreKey) {
-				$rBouquets = isset($rData[$rBouquetKey . '_' . $rSplit[1]]) ? '[' . implode(',', array_map('intval', $rData[$rBouquetKey . '_' . $rSplit[1]])) . ']' : '[]';
-				$db->query('UPDATE `watch_categories` SET `category_id` = ?, `bouquets` = ? WHERE `genre_id` = ? AND `type` = ?;', $rValue, $rBouquets, $rSplit[1], $rType);
-			}
-		}
-	}
-
 	public static function editWatchSettings($rData) {
 		$db = self::db();
-		self::applyGenreCategoryUpdates($rData, 'genre', 'bouquet', 1);
-		self::applyGenreCategoryUpdates($rData, 'genretv', 'bouquettv', 2);
-
-		$altTitles = isset($rData['alternative_titles']);
-		$fallbackParser = isset($rData['fallback_parser']);
-		$db->query('UPDATE `settings` SET `percentage_match` = ?, `scan_seconds` = ?, `thread_count` = ?, `max_genres` = ?, `max_items` = ?, `alternative_titles` = ?, `fallback_parser` = ?;', $rData['percentage_match'], $rData['scan_seconds'], $rData['thread_count'], $rData['max_genres'], $rData['max_items'], $altTitles, $fallbackParser);
+		$db->query('UPDATE `settings` SET `scan_seconds` = ?, `max_items` = ?;', intval($rData['scan_seconds'] ?? 0), intval($rData['max_items'] ?? 0));
 
 		SettingsManager::clearCache();
 
@@ -60,7 +41,7 @@ class WatchService {
 	public static function processWatchFolder($rData) {
 		$db = self::db();
 		if (isset($rData['edit'])) {
-			$rArray = AdminHelpers::overwriteData(StreamRepository::getWatchFolder($rData['edit']), $rData);
+			$rArray = AdminHelpers::overwriteData(self::getWatchFolder($rData['edit']), $rData);
 		} else {
 			$rArray = QueryHelper::verifyPostTable('watch_folders', $rData);
 			unset($rArray['id']);
@@ -108,6 +89,76 @@ class WatchService {
 		return array('status' => STATUS_FAILURE, 'data' => $rData);
 	}
 
+	/**
+	 * Admin API: one folder.
+	 *
+	 * @param int $rID
+	 * @return array
+	 */
+	public static function apiGetFolder(int $rID) {
+		$rFolder = self::getWatchFolder($rID);
+		return $rFolder ? array('status' => STATUS_SUCCESS, 'data' => $rFolder) : array('status' => STATUS_FAILURE);
+	}
+
+	/**
+	 * Admin API: create a folder, or edit the one `$rID` names; replies with
+	 * the stored folder.
+	 *
+	 * @param array    $rData
+	 * @param int|null $rID
+	 * @return array
+	 */
+	public static function apiSaveFolder(array $rData, ?int $rID = null) {
+		unset($rData['edit'], $rData['id']);
+		if ($rID !== null) {
+			if (!self::getWatchFolder($rID)) {
+				return array('status' => STATUS_FAILURE);
+			}
+			$rData['edit'] = $rID;
+		}
+		$rReturn = self::processWatchFolder($rData);
+		if (isset($rReturn['data']['insert_id'])) {
+			$rReturn['data'] = self::apiGetFolder((int) $rReturn['data']['insert_id'])['data'] ?? null;
+		}
+		return $rReturn;
+	}
+
+	/**
+	 * Admin API: delete a folder.
+	 *
+	 * @param int $rID
+	 * @return array
+	 */
+	public static function apiDeleteFolder(int $rID) {
+		return array('status' => self::deleteWatchFolder($rID) ? STATUS_SUCCESS : STATUS_FAILURE);
+	}
+
+	/**
+	 * A watch-folder row by id.
+	 *
+	 * @param int $rID
+	 * @return array|false The row, or false if there is none.
+	 */
+	public static function getWatchFolder(int $rID) {
+		$db = self::db();
+		$db->query('SELECT * FROM `watch_folders` WHERE `id` = ?;', $rID);
+		return $db->num_rows() == 1 ? $db->get_row() : false;
+	}
+
+	/**
+	 * Delete a watch folder.
+	 *
+	 * @param int $rID
+	 * @return bool False if there is no such folder.
+	 */
+	public static function deleteWatchFolder(int $rID) {
+		if (!self::getWatchFolder($rID)) {
+			return false;
+		}
+		self::db()->query('DELETE FROM `watch_folders` WHERE `id` = ?;', $rID);
+		return true;
+	}
+
 	public static function getWatchFolders($rType = null) {
 		$db = self::db();
 		if ($rType) {
@@ -117,22 +168,6 @@ class WatchService {
 		}
 
 		return $db->get_rows();
-	}
-
-	public static function getWatchCategories($rType = null) {
-		$db = self::db();
-		$rReturn = array();
-		if ($rType) {
-			$db->query('SELECT * FROM `watch_categories` WHERE `type` = ? ORDER BY `genre_id` ASC;', $rType);
-		} else {
-			$db->query('SELECT * FROM `watch_categories` ORDER BY `genre_id` ASC;');
-		}
-
-		foreach ($db->get_rows() as $rRow) {
-			$rReturn[$rRow['genre_id']] = $rRow;
-		}
-
-		return $rReturn;
 	}
 
 	public static function forceWatch($rServerID, $rWatchID) {
@@ -149,96 +184,13 @@ class WatchService {
 
 	public static function killWatch() {
 		$db = self::db();
-		$db->query("SELECT DISTINCT(`server_id`) AS `server_id` FROM `watch_folders` WHERE `active` = 11 AND `type` <> 'plex';");
+		$db->query("SELECT DISTINCT(`server_id`) AS `server_id` FROM `watch_folders` WHERE `type` <> 'plex';");
 		foreach ($db->get_rows() as $rRow) {
 			if (ServerRepository::getAll()[$rRow['server_id']]['server_online']) {
 				ApiClient::systemRequest($rRow['server_id'], array('action' => 'kill_watch'));
 			}
 		}
 		return true;
-	}
-
-	public static function getRecordings() {
-		$db = self::db();
-		$rRecordings = array();
-		$db->query('SELECT * FROM `recordings` ORDER BY `id` DESC;');
-		foreach ($db->get_rows() as $rRow) {
-			$rRecordings[] = $rRow;
-		}
-		return $rRecordings;
-	}
-
-	public static function deleteRecording($rID) {
-		$db = self::db();
-		$db->query('SELECT `created_id`, `source_id` FROM `recordings` WHERE `id` = ?;', $rID);
-		if ($db->num_rows() > 0) {
-			$rRecording = $db->get_row();
-			if ($rRecording['created_id']) {
-				StreamRepository::deleteStream($rRecording['created_id'], $rRecording['source_id'], true, true);
-			}
-			shell_exec("kill -9 `ps -ef | grep 'Record[" . intval($rID) . "]' | grep -v grep | awk '{print $2}'`");
-			$db->query('DELETE FROM `recordings` WHERE `id` = ?;', $rID);
-		}
-		return true;
-	}
-
-	/**
-	 * Insert a genre into watch_categories for the given type, if it isn't there yet.
-	 *
-	 * @param int $rGenreID TMDb genre id.
-	 * @param string $rGenreName TMDb genre name.
-	 * @param int $rType watch_categories type (1 = movie, 2 = series).
-	 * @param array $rCurrentCats [type => [genre_id, ...]] — genres already present.
-	 */
-	public static function insertMissingGenre($rGenreID, $rGenreName, $rType, array $rCurrentCats) {
-		if (!in_array($rGenreID, $rCurrentCats[$rType])) {
-			self::db()->query("INSERT INTO `watch_categories`(`type`, `genre_id`, `genre`, `category_id`, `bouquets`) VALUES(?, ?, ?, 0, '[]');", $rType, $rGenreID, $rGenreName);
-		}
-	}
-
-	/**
-	 * Sync TMDb movie/TV genres into the watch_categories table (types 1 & 2).
-	 *
-	 * Lives in the watch module because watch owns the watch_categories table
-	 * (previously TMDbService::updateCategories() in the core VOD domain).
-	 * Pulls the genre lists from the bundled TMDb client and inserts any that
-	 * are missing, de-duplicating existing rows by genre_id.
-	 *
-	 * @return void
-	 */
-
-	public static function updateCategories() {
-		$db = self::db();
-		$rTMDB = TmdbApiService::createClient(SettingsManager::getAll()['tmdb_api_key']);
-
-		$rCurrentCats = array(1 => array(), 2 => array());
-		$db->query('SELECT `id`, `type`, `genre_id` FROM `watch_categories`;');
-
-		if ($db->num_rows() > 0) {
-			foreach ($db->get_rows() as $rRow) {
-				if (array_key_exists($rRow['type'], $rCurrentCats)) {
-
-					if (in_array($rRow['genre_id'], $rCurrentCats[$rRow['type']])) {
-						$db->query('DELETE FROM `watch_categories` WHERE `id` = ?;', $rRow['id']);
-					}
-					$rCurrentCats[$rRow['type']][] = $rRow['genre_id'];
-				}
-			}
-		}
-
-		$rMovieGenres = $rTMDB->getMovieGenres();
-
-		foreach ($rMovieGenres as $rMovieGenre) {
-			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 1, $rCurrentCats);
-			self::insertMissingGenre($rMovieGenre->getID(), $rMovieGenre->getName(), 2, $rCurrentCats);
-		}
-
-		$rTVGenres = $rTMDB->getTVGenres();
-
-		foreach ($rTVGenres as $rTVGenre) {
-			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 1, $rCurrentCats);
-			self::insertMissingGenre($rTVGenre->getID(), $rTVGenre->getName(), 2, $rCurrentCats);
-		}
 	}
 
 	/**
@@ -310,7 +262,25 @@ class WatchService {
 			return;
 		}
 		$db = self::db();
-		$db->query('UPDATE `watch_logs` SET `status` = 1, `stream_id` = ? WHERE `filename` = ? AND `type` = ?;', (int) $rStreamID, $rPath, (int) $rType);
+		// logImportResult() stores filenames HTML-escaped.
+		$db->query('UPDATE `watch_logs` SET `status` = 1, `stream_id` = ? WHERE `filename` = ? AND `type` = ?;', (int) $rStreamID, htmlspecialchars((string) $rPath, ENT_QUOTES, 'UTF-8'), (int) $rType);
+	}
+
+	/**
+	 * Record a file's import outcome, replacing any earlier row for that file.
+	 *
+	 * @param int    $rType     1 = movie, 2 = series.
+	 * @param int    $rServerID
+	 * @param string $rFilename Raw path or URL (stored HTML-escaped, as the log view expects).
+	 * @param int    $rStatus   VodImportResultEvent::STATUS_*
+	 * @param int    $rStreamID
+	 * @return void
+	 */
+	public static function logImportResult($rType, $rServerID, $rFilename, $rStatus, $rStreamID = 0) {
+		$db = self::db();
+		$rFilename = htmlspecialchars((string) $rFilename, ENT_QUOTES, 'UTF-8');
+		$db->query('DELETE FROM `watch_logs` WHERE `filename` = ? AND `type` = ? AND `server_id` = ?;', $rFilename, (int) $rType, (int) $rServerID);
+		$db->query('INSERT INTO `watch_logs`(`type`, `server_id`, `filename`, `status`, `stream_id`) VALUES(?, ?, ?, ?, ?);', (int) $rType, (int) $rServerID, $rFilename, (int) $rStatus, (int) $rStreamID);
 	}
 
 	/**

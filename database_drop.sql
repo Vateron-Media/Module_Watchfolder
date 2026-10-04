@@ -4,4 +4,3 @@
 DROP TABLE IF EXISTS `watch_refresh`;
 DROP TABLE IF EXISTS `watch_logs`;
 DROP TABLE IF EXISTS `watch_folders`;
-DROP TABLE IF EXISTS `watch_categories`;

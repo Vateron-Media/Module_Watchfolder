@@ -7,7 +7,6 @@ use XcVm\Core\Http\RequestManager;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Public\Controllers\Admin\TableController;
 use XcVm\Domain\Bouquet\BouquetService;
-use XcVm\Domain\Stream\StreamRepository;
 use XcVm\Infrastructure\Database\DatabaseFactory;
 
 /**
@@ -66,7 +65,7 @@ class WatchController {
         global $rMobile, $rSettings, $rPermissions, $language, $rTMDBLanguages;
 
         if (isset(RequestManager::getAll()['id'])) {
-            $rFolder = StreamRepository::getWatchFolder(RequestManager::getAll()['id']);
+            $rFolder = WatchService::getWatchFolder(RequestManager::getAll()['id']);
             if (!$rFolder) {
                 AdminHelpers::goHome();
             }
@@ -107,6 +106,40 @@ class WatchController {
     //  API actions (JSON)
     // ───────────────────────────────────────────────────────────
 
+    /** action=settings_watch_save — save the Watch Settings form (POST only). */
+    public function apiSaveSettings() {
+        self::postOnly();
+        self::reply(WatchService::editWatchSettings(RequestManager::getAll()), 'settings_watch');
+    }
+
+    /** action=watch_folder_save — add or edit a folder (POST only). */
+    public function apiSaveFolder() {
+        self::postOnly();
+        self::reply(WatchService::processWatchFolder(RequestManager::getAll()), 'watch');
+    }
+
+    /**
+     * State changes never run from a GET (a CSRF via <img src>): answer 405,
+     * as core's post.php does.
+     */
+    private static function postOnly() {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            http_response_code(405);
+            echo json_encode(['result' => false, 'status' => 0, 'error' => 'Method Not Allowed']);
+            exit();
+        }
+    }
+
+    /** The JSON the forms expect: redirect to $rPage on success, else the error. */
+    private static function reply(array $rReturn, string $rPage) {
+        if ($rReturn['status'] == STATUS_SUCCESS) {
+            echo json_encode(['result' => true, 'location' => $rPage . '?status=' . intval($rReturn['status']), 'status' => $rReturn['status']]);
+        } else {
+            echo json_encode(['result' => false, 'data' => $rReturn['data'] ?? null, 'status' => $rReturn['status']]);
+        }
+        exit();
+    }
+
     public function apiEnable() {
         WatchService::enableWatch();
         echo json_encode(['result' => true]);
@@ -130,13 +163,13 @@ class WatchController {
         $rFolderID = RequestManager::getAll()['folder_id'] ?? 0;
 
         if ($rSub === 'delete') {
-            StreamRepository::deleteWatchFolder($rFolderID);
+            WatchService::deleteWatchFolder($rFolderID);
             echo json_encode(['result' => true]);
             exit();
         }
 
         if ($rSub === 'force') {
-            $rFolder = StreamRepository::getWatchFolder($rFolderID);
+            $rFolder = WatchService::getWatchFolder($rFolderID);
             if ($rFolder) {
                 WatchService::forceWatch($rFolder['server_id'], $rFolder['id']);
                 echo json_encode(['result' => true]);

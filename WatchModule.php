@@ -3,12 +3,14 @@
 namespace XcVm\Module\Watch;
 
 use XcVm\Cli\CommandRegistry;
-use XcVm\Core\Container\ServiceContainer;
 use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
 use XcVm\Core\Events\ListensTo;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
 use XcVm\Core\Events\Vod\VodImportedEvent;
+use XcVm\Core\Events\Vod\VodImportResultEvent;
+use XcVm\Core\Container\ServiceContainer;
 use XcVm\Core\Http\Router;
+use XcVm\Core\Module\AdminApiRegistry;
 use XcVm\Core\Module\BaseModule;
 use XcVm\Core\Module\NavbarItem;
 use XcVm\Core\Module\NavbarRegistry;
@@ -20,8 +22,9 @@ use XcVm\Core\Module\TopbarRegistry;
 /**
  * Watch Module
  *
- * Watch Folder / Recording module.
- * Registers services, routes, API actions and cron jobs.
+ * Watch Folder module: scans folders and hands each new file to
+ * core's `vod_import_item`; logs the results. Registers routes, API actions,
+ * the `cron:watch` job and event listeners.
  *
  * ──────────────────────────────────────────────────────────────────
  * What it includes:
@@ -29,7 +32,6 @@ use XcVm\Core\Module\TopbarRegistry;
  *
  *   Services:
  *     - WatchService    — Watch Folder CRUD, settings, enable/disable/kill
- *     - RecordingService — recording (DVR) scheduling
  *
  *   Controller:
  *     - WatchController — HTTP request and API handling
@@ -37,18 +39,17 @@ use XcVm\Core\Module\TopbarRegistry;
  *   Pages:
  *     - watch          — folder list
  *     - watch/add      — add/edit
- *     - watch/settings — watch settings (settings_watch)
  *     - watch/output   — logs (watch_output)
- *     - watch/record   — recording schedule (record)
+ *     - settings/watch — watch settings (settings_watch)
  *
  *   API actions:
+ *     - settings_watch_save / watch_folder_save — the two forms (POST only)
  *     - enable_watch   — enable all folders
  *     - disable_watch  — disable all folders
  *     - kill_watch     — kill processes
  *     - folder         — delete/run a folder
  *
  * @see WatchService
- * @see RecordingService
  * @see WatchController
  *
  * @package XC_VM_Module_Watch
@@ -65,7 +66,7 @@ class WatchModule extends BaseModule {
     }
 
     public function getVersion(): string {
-        return '1.0.5';
+        return '1.1.0';
     }
 
     /**
@@ -93,17 +94,27 @@ class WatchModule extends BaseModule {
         WatchService::markImported($rEvent->streamId, $rEvent->sourcePath, $rEvent->type);
     }
 
-    public function boot(ServiceContainer $container): void {
-        $db = $container->get('db');
-        WatchService::setDb($db);
-        RecordingService::setDb($db);
-        WatchCron::setDb($db);
-        WatchItem::setDb($db);
+    /**
+     * Log each file core's vod_import_item processed (folder scans and the
+     * manual Movies/Series import alike) to watch_logs.
+     */
+    #[ListensTo(VodImportResultEvent::class)]
+    public function onVodImportResult(VodImportResultEvent $rEvent): void {
+        WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId);
+    }
 
-        $container->set('watch.service', 'WatchService');
-        $container->set('watch.recording', 'RecordingService');
-        $container->set('watch.controller', function ($c) {
-            return new WatchController();
+    /**
+     * The module's Admin REST API actions (core no longer has a case for them).
+     */
+    public function boot(ServiceContainer $container): void {
+        AdminApiRegistry::add('get_watch_folders', static fn(array $rData): array => array('status' => STATUS_SUCCESS, 'data' => WatchService::getWatchFolders()), 'rows');
+        AdminApiRegistry::add('get_watch_folder', static fn(array $rData): array => WatchService::apiGetFolder((int) ($rData['id'] ?? 0)), 'row');
+        AdminApiRegistry::add('create_watch_folder', static fn(array $rData): array => WatchService::apiSaveFolder($rData));
+        AdminApiRegistry::add('edit_watch_folder', static fn(array $rData): array => WatchService::apiSaveFolder($rData, (int) ($rData['id'] ?? 0)));
+        AdminApiRegistry::add('delete_watch_folder', static fn(array $rData): array => WatchService::apiDeleteFolder((int) ($rData['id'] ?? 0)));
+        AdminApiRegistry::add('reload_watch_folder', static function (array $rData): array {
+            WatchService::forceWatch($rData['server_id'] ?? SERVER_ID, $rData['id'] ?? 0);
+            return array('status' => STATUS_SUCCESS);
         });
     }
 
@@ -124,6 +135,12 @@ class WatchModule extends BaseModule {
             'permission' => ['adv', 'folder_watch_settings'],
         ]);
 
+        $router->api('settings_watch_save', [WatchController::class, 'apiSaveSettings'], [
+            'permission' => ['adv', 'folder_watch_settings'],
+        ]);
+        $router->api('watch_folder_save', [WatchController::class, 'apiSaveFolder'], [
+            'permission' => ['adv', 'folder_watch_add'],
+        ]);
         $router->api('enable_watch', [WatchController::class, 'apiEnable'], [
             'permission' => ['adv', 'folder_watch_settings'],
         ]);
@@ -148,7 +165,6 @@ class WatchModule extends BaseModule {
 
     public function registerCommands(CommandRegistry $registry): void {
         $registry->register(new WatchCronJob());
-        $registry->register(new WatchItemCommand());
     }
 
     public function registerNavbar(NavbarRegistry $registry): void {

@@ -57,7 +57,7 @@ final class WatchCronTest extends TestCase {
     // --- cleanupMissing: regression for the type=3/type=5 mismatch bug -----
 
     public function testCleanupMissingDeletesASeriesStreamWhoseFileIsGone(): void {
-        // Series episodes are stored with streams.type = 5 (see WatchItem's
+        // Series episodes are stored with streams.type = 5 (see core VodItemImporter's
         // array('movie' => 2, 'series' => 5) mapping). cleanupMissing() used
         // to filter on type = 3, so a series folder's delete_missing pass
         // never matched anything at all — this exercises the real method.
@@ -157,5 +157,15 @@ final class WatchCronTest extends TestCase {
         $rPath = WATCH_TMP_PATH . uniqid('test_', true) . '.bouquet';
         file_put_contents($rPath, json_encode($rData));
         return $rPath;
+    }
+
+    // --- scanSettings: the cron used to read them from globals nothing set ---
+
+    public function testScanSettingsReadTheSettingsWithTheirFallbacks(): void {
+        \XcVm\Core\Config\SettingsManager::set(array('thread_count' => 6));
+        $this->assertSame(array(120, 6, 25), WatchCron::scanSettings(array('scan_seconds' => '120', 'max_items' => '25')));
+
+        \XcVm\Core\Config\SettingsManager::set(array());
+        $this->assertSame(array(3600, 4, 0), WatchCron::scanSettings(array()), 'unset: hourly scans, 4 at a time, no limit');
     }
 }

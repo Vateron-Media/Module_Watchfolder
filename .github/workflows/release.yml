@@ -9,13 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history + tags for the release notes
       - name: Build release assets
         run: make release
+      - name: Generate release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --current --strip header
+        env:
+          OUTPUT: ${{ runner.temp }}/notes.md
       - name: Publish release (idempotent)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           gh release view "$TAG" >/dev/null 2>&1 \
-            || gh release create "$TAG" --title "$TAG" --notes "Release $TAG"
+            || gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           gh release upload "$TAG" module.tar.gz hashes.md5 --clobber
