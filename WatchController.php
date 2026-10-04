@@ -5,6 +5,7 @@ namespace XcVm\Module\Watch;
 use XcVm\Core\Auth\Authorization;
 use XcVm\Core\Http\RequestManager;
 use XcVm\Core\Util\AdminHelpers;
+use XcVm\Core\Util\LayoutRenderer;
 use XcVm\Public\Controllers\Admin\TableController;
 use XcVm\Domain\Bouquet\BouquetService;
 use XcVm\Infrastructure\Database\DatabaseFactory;
@@ -37,14 +38,9 @@ class WatchController {
      */
     protected $viewsPath;
 
-    /** @var string Path to the layout files */
-    protected $layoutsPath;
 
     public function __construct() {
         $this->viewsPath = __DIR__ . '/views';
-        $this->layoutsPath = MAIN_HOME . 'Public/Views/layouts/';
-        require_once $this->layoutsPath . 'admin.php';
-        require_once $this->layoutsPath . 'footer.php';
     }
 
     // ───────────────────────────────────────────────────────────
@@ -55,9 +51,9 @@ class WatchController {
         global $rMobile, $rSettings, $rServers;
         $_TITLE = 'Watch Folder';
 
-        renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
+        LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
         include $this->viewsPath . '/watch.php';
-        renderUnifiedLayoutFooter('admin');
+        LayoutRenderer::renderFooter('admin');
         include $this->viewsPath . '/watch_scripts.php';
     }
 
@@ -74,9 +70,9 @@ class WatchController {
         $rBouquets = BouquetService::getAllSimple();
         $_TITLE = isset($rFolder) ? 'Edit Folder' : 'Add Folder';
 
-        renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
+        LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
         include $this->viewsPath . '/watch_add.php';
-        renderUnifiedLayoutFooter('admin');
+        LayoutRenderer::renderFooter('admin');
         include $this->viewsPath . '/watch_add_scripts.php';
     }
 
@@ -86,9 +82,9 @@ class WatchController {
         $rBouquets = BouquetService::getAllSimple();
         $_TITLE = 'Watch Settings';
 
-        renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
+        LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
         include $this->viewsPath . '/settings_watch.php';
-        renderUnifiedLayoutFooter('admin');
+        LayoutRenderer::renderFooter('admin');
         include $this->viewsPath . '/settings_watch_scripts.php';
     }
 
@@ -96,9 +92,9 @@ class WatchController {
         global $rMobile, $rSettings, $rServers, $language;
         $_TITLE = 'Watch Folder Logs';
 
-        renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
+        LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
         include $this->viewsPath . '/watch_output.php';
-        renderUnifiedLayoutFooter('admin');
+        LayoutRenderer::renderFooter('admin');
         include $this->viewsPath . '/watch_output_scripts.php';
     }
 
