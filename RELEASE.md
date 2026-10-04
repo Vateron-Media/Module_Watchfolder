@@ -97,17 +97,16 @@ and run a scan against a test folder.
 
 ## 5. Changelog / Release Notes
 
-Collect user-facing changes since the previous tag:
+Notes are generated automatically on tag push by
+[git-cliff](https://git-cliff.org) (default config) from the conventional commits
+since the previous tag; non-conventional commits are skipped. Preview locally:
 
 ```bash
-PREV_TAG=$(git describe --tags --abbrev=0)
-git log --pretty=format:"- %s (%h)" "$PREV_TAG"..main
+npx git-cliff --unreleased --strip header
 ```
 
-> 💡 The workflow creates the release with the placeholder body `Release <tag>` if
-> none exists. To get proper notes, either **create the GitHub release with notes
-> first** (the workflow is idempotent — it will only upload assets to it), or edit
-> the release description right after the workflow finishes.
+> 💡 To write the notes by hand instead, **create the GitHub release with notes
+> first** — the workflow is idempotent and will only upload assets to it.
 
 ---
 
@@ -131,7 +130,7 @@ git push origin "${VERSION}"
 GitHub Actions (`release.yml`) will then:
 
 - run `make release` (builds `module.tar.gz` + `hashes.md5`),
-- create the release for the tag if it doesn't exist,
+- create the release for the tag with generated notes if it doesn't exist,
 - upload/overwrite both assets (`--clobber`).
 
 > ✅ Wait for the Actions run to finish, then check
@@ -143,7 +142,7 @@ GitHub Actions (`release.yml`) will then:
 
 - [ ] Both assets (`module.tar.gz`, `hashes.md5`) are attached and downloadable.
 - [ ] `md5sum -c hashes.md5` passes on the downloaded pair.
-- [ ] Release notes are filled in (replace the `Release <tag>` placeholder if needed).
+- [ ] Generated release notes read well (edit the release description if needed).
 - [ ] On a panel with the previous version installed: the **Update to X.Y.Z**
       button appears (weekly cron `cron:module_updates`, or trigger the check
       manually) and the update completes — the panel backs up, replaces files,
