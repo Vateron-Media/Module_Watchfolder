@@ -13,6 +13,7 @@
 		function esc(v) { return $("<div>").text(v == null ? "" : v).html(); }
 		function typeCell(d) { return d == 1 ? "Movies" : (d == 2 ? "Series" : ""); }
 		function serverCell(d, t, row) { return canServers ? '<a href="server_view?id=' + row.server_id + '">' + esc(row.server_name) + '</a>' : esc(row.server_name); }
+		function fileCell(d, t, row) { return row.title ? '<div class="fw-medium">' + esc(row.title) + '</div><small class="text-body-secondary text-break">' + esc(d) + '</small>' : esc(d); }
 		function statusCell(d) { var s = WATCH_STATUS[d]; return s ? '<span class="badge bg-label-' + s[0] + '">' + s[1] + '</span>' : ""; }
 		function actionsCell(d, t, row) {
 			var h = '<div class="d-inline-flex gap-1">';
@@ -87,7 +88,7 @@
 					{ data: "id", className: "text-center" },
 					{ data: "type", render: typeCell },
 					{ data: null, render: serverCell },
-					{ data: "filename" },
+					{ data: "filename", render: fileCell },
 					{ data: "status", className: "text-center", render: statusCell },
 					{ data: "dateadded", className: "text-center" },
 					{ data: null, orderable: false, searchable: false, className: "text-center", render: actionsCell },

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `watch_logs` (
   `type` int(1) DEFAULT '0',
   `server_id` int(8) DEFAULT '0',
   `filename` varchar(4096) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `title` varchar(1024) COLLATE utf8_unicode_ci DEFAULT NULL,
   `status` int(1) DEFAULT '0',
   `stream_id` int(8) DEFAULT '0',
   `dateadded` timestamp NULL DEFAULT CURRENT_TIMESTAMP,

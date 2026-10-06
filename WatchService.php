@@ -274,13 +274,14 @@ class WatchService {
 	 * @param string $rFilename Raw path or URL (stored HTML-escaped, as the log view expects).
 	 * @param int    $rStatus   VodImportResultEvent::STATUS_*
 	 * @param int    $rStreamID
+	 * @param string $rTitle    An M3U import's entry name (raw); '' for a folder scan.
 	 * @return void
 	 */
-	public static function logImportResult($rType, $rServerID, $rFilename, $rStatus, $rStreamID = 0) {
+	public static function logImportResult($rType, $rServerID, $rFilename, $rStatus, $rStreamID = 0, $rTitle = '') {
 		$db = self::db();
 		$rFilename = htmlspecialchars((string) $rFilename, ENT_QUOTES, 'UTF-8');
 		$db->query('DELETE FROM `watch_logs` WHERE `filename` = ? AND `type` = ? AND `server_id` = ?;', $rFilename, (int) $rType, (int) $rServerID);
-		$db->query('INSERT INTO `watch_logs`(`type`, `server_id`, `filename`, `status`, `stream_id`) VALUES(?, ?, ?, ?, ?);', (int) $rType, (int) $rServerID, $rFilename, (int) $rStatus, (int) $rStreamID);
+		$db->query('INSERT INTO `watch_logs`(`type`, `server_id`, `filename`, `title`, `status`, `stream_id`) VALUES(?, ?, ?, ?, ?, ?);', (int) $rType, (int) $rServerID, $rFilename, (string) $rTitle === '' ? null : (string) $rTitle, (int) $rStatus, (int) $rStreamID);
 	}
 
 	/**
