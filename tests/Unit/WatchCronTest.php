@@ -48,6 +48,11 @@ final class WatchCronTest extends TestCase {
     }
 
     protected function tearDown(): void {
+        // A setUp() that threw first (no test DB) leaves it null, and glob('*')
+        // unlinked every file in the working directory: the repo root.
+        if ($this->watchTmp === null) {
+            return;
+        }
         foreach (glob($this->watchTmp . '*') as $rFile) {
             unlink($rFile);
         }
