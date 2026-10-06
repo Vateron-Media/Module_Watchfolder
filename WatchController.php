@@ -4,6 +4,7 @@ namespace XcVm\Module\Watch;
 
 use XcVm\Core\Auth\Authorization;
 use XcVm\Core\Http\RequestManager;
+use XcVm\Core\Localization\Translator;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Core\Util\LayoutRenderer;
 use XcVm\Public\Controllers\Admin\TableController;
@@ -58,7 +59,9 @@ class WatchController {
     }
 
     public function add() {
-        global $rMobile, $rSettings, $rPermissions, $language, $rTMDBLanguages;
+        global $rMobile, $rSettings, $rPermissions, $rTMDBLanguages;
+        // No global $language on the web path: a null one fatals mid-page.
+        $language = Translator::class;
 
         if (isset(RequestManager::getAll()['id'])) {
             $rFolder = WatchService::getWatchFolder(RequestManager::getAll()['id']);
@@ -89,7 +92,8 @@ class WatchController {
     }
 
     public function output() {
-        global $rMobile, $rSettings, $rServers, $language;
+        global $rMobile, $rSettings, $rServers;
+        $language = Translator::class;
         $_TITLE = 'Watch Folder Logs';
 
         LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
@@ -242,10 +246,10 @@ class WatchController {
         $rOrderRow = (0 < strlen((string) $rOrderColumn)) ? (int) $rOrderColumn : 0;
         $rWhere = $rWhereV = [];
         if (0 < strlen(RequestManager::get('search')['value'] ?? '')) {
-            foreach (range(1, 3) as $rInt) {
+            foreach (range(1, 4) as $rInt) {
                 $rWhereV[] = '%' . RequestManager::get('search')['value'] . '%';
             }
-            $rWhere[] = '(`watch_logs`.`id` LIKE ? OR `watch_logs`.`filename` LIKE ? OR `watch_logs`.`dateadded` LIKE ?)';
+            $rWhere[] = '(`watch_logs`.`id` LIKE ? OR `watch_logs`.`filename` LIKE ? OR `watch_logs`.`title` LIKE ? OR `watch_logs`.`dateadded` LIKE ?)';
         }
         if (0 < (int) (RequestManager::get('server') ?? 0)) {
             $rWhere[] = '`watch_logs`.`server_id` = ?';
@@ -269,7 +273,7 @@ class WatchController {
         $rReturn['recordsTotal'] = ($db->num_rows() == 1) ? $db->get_row()['count'] : 0;
         $rReturn['recordsFiltered'] = ($rIsAPI ? ($rReturn['recordsTotal'] < $rLimit ? $rReturn['recordsTotal'] : $rLimit) : $rReturn['recordsTotal']);
         if (0 < $rReturn['recordsTotal']) {
-            $db->query('SELECT `watch_logs`.`id`, `watch_logs`.`type`, `watch_logs`.`server_id`, `servers`.`server_name`, `watch_logs`.`filename`, `watch_logs`.`status`, `watch_logs`.`stream_id`, `watch_logs`.`dateadded` FROM `watch_logs` LEFT JOIN `servers` ON `servers`.`id` = `watch_logs`.`server_id` ' . $rWhereString . ' ' . $rOrderBy . ' LIMIT ' . $rStart . ', ' . $rLimit . ';', ...$rWhereV);
+            $db->query('SELECT `watch_logs`.`id`, `watch_logs`.`type`, `watch_logs`.`server_id`, `servers`.`server_name`, `watch_logs`.`filename`, `watch_logs`.`title`, `watch_logs`.`status`, `watch_logs`.`stream_id`, `watch_logs`.`dateadded` FROM `watch_logs` LEFT JOIN `servers` ON `servers`.`id` = `watch_logs`.`server_id` ' . $rWhereString . ' ' . $rOrderBy . ' LIMIT ' . $rStart . ', ' . $rLimit . ';', ...$rWhereV);
             if (0 < $db->num_rows()) {
                 foreach ($db->get_rows() as $rRow) {
                     if ($rIsAPI) {
@@ -281,6 +285,7 @@ class WatchController {
                             'server_id'   => (int) $rRow['server_id'],
                             'server_name' => $rRow['server_name'],
                             'filename'    => $rRow['filename'],
+                            'title'       => (string) ($rRow['title'] ?? ''),
                             'status'      => (int) $rRow['status'],
                             'stream_id'   => isset($rRow['stream_id']) ? (int) $rRow['stream_id'] : 0,
                             'dateadded'   => $rRow['dateadded'],

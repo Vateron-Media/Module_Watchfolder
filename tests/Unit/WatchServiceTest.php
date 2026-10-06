@@ -18,7 +18,7 @@ final class WatchServiceTest extends TestCase {
             'CREATE TABLE watch_refresh (id INTEGER PRIMARY KEY AUTOINCREMENT, stream_id INTEGER);'
         );
         $this->db->exec(
-            'CREATE TABLE watch_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, server_id INTEGER, filename TEXT, status INTEGER, stream_id INTEGER);'
+            'CREATE TABLE watch_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, server_id INTEGER, filename TEXT, title TEXT, status INTEGER, stream_id INTEGER);'
         );
         $this->db->exec(
             'CREATE TABLE watch_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, bouquets TEXT, fb_bouquets TEXT);'
@@ -59,6 +59,14 @@ final class WatchServiceTest extends TestCase {
         $rRows = $this->db->get_rows();
         $this->assertCount(2, $rRows);
         $this->assertSame(array('/media/a&amp;b.mkv', 1, 42), array($rRows[0]['filename'], (int) $rRows[0]['status'], (int) $rRows[0]['stream_id']));
+    }
+
+    public function testLogImportResultKeepsAnM3uEntrysTitle(): void {
+        WatchService::logImportResult(2, 1, 'http://host/series/1.mkv', 3, 0, 'Les Psys (2026) - S01E01');
+        WatchService::logImportResult(2, 1, '/media/b.mkv', 4);
+
+        $this->db->query('SELECT `title` FROM `watch_logs` ORDER BY `id` ASC;');
+        $this->assertSame(array('Les Psys (2026) - S01E01', null), array_column($this->db->get_rows(), 'title'));
     }
 
     public function testMarkImportedFindsARowLoggedWithSpecialCharacters(): void {

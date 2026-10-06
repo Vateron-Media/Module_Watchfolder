@@ -66,7 +66,7 @@ class WatchModule extends BaseModule {
     }
 
     public function getVersion(): string {
-        return '1.1.1';
+        return '1.1.2';
     }
 
     /**
@@ -100,7 +100,8 @@ class WatchModule extends BaseModule {
      */
     #[ListensTo(VodImportResultEvent::class)]
     public function onVodImportResult(VodImportResultEvent $rEvent): void {
-        WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId);
+        // ?? '': a core older than the event's title has no such property.
+        WatchService::logImportResult($rEvent->type, $rEvent->serverId, $rEvent->filename, $rEvent->status, $rEvent->streamId, $rEvent->title ?? '');
     }
 
     /**
