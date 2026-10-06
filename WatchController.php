@@ -4,6 +4,7 @@ namespace XcVm\Module\Watch;
 
 use XcVm\Core\Auth\Authorization;
 use XcVm\Core\Http\RequestManager;
+use XcVm\Core\Localization\Translator;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Core\Util\LayoutRenderer;
 use XcVm\Public\Controllers\Admin\TableController;
@@ -58,7 +59,9 @@ class WatchController {
     }
 
     public function add() {
-        global $rMobile, $rSettings, $rPermissions, $language, $rTMDBLanguages;
+        global $rMobile, $rSettings, $rPermissions, $rTMDBLanguages;
+        // No global $language on the web path: a null one fatals mid-page.
+        $language = Translator::class;
 
         if (isset(RequestManager::getAll()['id'])) {
             $rFolder = WatchService::getWatchFolder(RequestManager::getAll()['id']);
@@ -89,7 +92,8 @@ class WatchController {
     }
 
     public function output() {
-        global $rMobile, $rSettings, $rServers, $language;
+        global $rMobile, $rSettings, $rServers;
+        $language = Translator::class;
         $_TITLE = 'Watch Folder Logs';
 
         LayoutRenderer::renderHeader('admin', ['_TITLE' => $_TITLE]);
