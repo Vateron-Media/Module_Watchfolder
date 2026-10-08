@@ -227,10 +227,35 @@ class WatchService {
 	}
 
 	/**
-	 * Drop watch scan logs / refresh-queue rows for deleted streams.
+	 * A deleted category: folders that named it (as their category or their
+	 * fallback) name none. Reacts to CategoryDeletedEvent.
+	 *
+	 * @param int $rCategoryID
+	 * @return void
+	 */
+	public static function handleCategoryDeleted($rCategoryID) {
+		$db = self::db();
+		$db->query('UPDATE `watch_folders` SET `category_id` = null WHERE `category_id` = ?;', (int) $rCategoryID);
+		$db->query('UPDATE `watch_folders` SET `fb_category_id` = null WHERE `fb_category_id` = ?;', (int) $rCategoryID);
+	}
+
+	/**
+	 * A deleted transcoding profile: folders that used it transcode with none.
+	 * Reacts to TranscodeProfileDeletedEvent.
+	 *
+	 * @param int $rProfileID
+	 * @return void
+	 */
+	public static function handleTranscodeProfileDeleted($rProfileID) {
+		self::db()->query('UPDATE `watch_folders` SET `transcode_profile_id` = 0 WHERE `transcode_profile_id` = ?;', (int) $rProfileID);
+	}
+
+	/**
+	 * Drop watch scan logs for deleted streams (core clears its own
+	 * watch_refresh queue).
 	 *
 	 * Reacts to StreamsDeletedEvent so core stream deletion no longer needs to
-	 * touch the watch_refresh / watch_logs tables directly.
+	 * touch the watch_logs table directly.
 	 *
 	 * @param int[] $rStreamIDs Deleted stream ids.
 	 * @return void
@@ -241,7 +266,6 @@ class WatchService {
 		}
 		$rIn = implode(',', array_map('intval', $rStreamIDs));
 		$db = self::db();
-		$db->query('DELETE FROM `watch_refresh` WHERE `stream_id` IN (' . $rIn . ');');
 		$db->query('DELETE FROM `watch_logs` WHERE `stream_id` IN (' . $rIn . ');');
 	}
 

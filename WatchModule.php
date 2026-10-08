@@ -6,7 +6,9 @@ use XcVm\Cli\CommandRegistry;
 use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
 use XcVm\Core\Events\ListensTo;
 use XcVm\Core\Events\Migration\LegacyTableMigrationEvent;
+use XcVm\Core\Events\Stream\CategoryDeletedEvent;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
+use XcVm\Core\Events\Stream\TranscodeProfileDeletedEvent;
 use XcVm\Core\Events\Vod\VodImportedEvent;
 use XcVm\Core\Events\Vod\VodImportResultEvent;
 use XcVm\Core\Container\ServiceContainer;
@@ -84,6 +86,18 @@ class WatchModule extends BaseModule {
     #[ListensTo(StreamsDeletedEvent::class)]
     public function onStreamsDeleted(StreamsDeletedEvent $rEvent): void {
         WatchService::handleStreamsDeleted($rEvent->streamIds);
+    }
+
+    /** Folders stop naming a deleted category (core no longer writes watch_folders). */
+    #[ListensTo(CategoryDeletedEvent::class)]
+    public function onCategoryDeleted(CategoryDeletedEvent $rEvent): void {
+        WatchService::handleCategoryDeleted($rEvent->categoryId);
+    }
+
+    /** Folders stop using a deleted transcoding profile (core no longer writes watch_folders). */
+    #[ListensTo(TranscodeProfileDeletedEvent::class)]
+    public function onTranscodeProfileDeleted(TranscodeProfileDeletedEvent $rEvent): void {
+        WatchService::handleTranscodeProfileDeleted($rEvent->profileId);
     }
 
     /**

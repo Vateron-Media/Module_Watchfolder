@@ -1,7 +1,9 @@
 -- watch module — master schema (current version)
 -- Full CREATE + seed for a fresh install. Must always reflect the LATEST schema
 -- (every migrations/<semver>.sql delta folded in), mirroring core's
--- bin/install/database.sql. Owns: watch_folders, watch_logs, watch_refresh.
+-- bin/install/database.sql. Owns: watch_folders, watch_logs. watch_refresh, the
+-- TMDb refresh queue, is core's (core migration 085): created here too, only for
+-- a core from before it, and never dropped by this module.
 -- plex depends on watch and reuses watch_folders. The genre mapping
 -- (watch_categories) is core's since 1.1.0 (core migration 062).
 
