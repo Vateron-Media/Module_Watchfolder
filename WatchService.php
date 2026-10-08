@@ -293,4 +293,36 @@ class WatchService {
 	public static function clearAllLogs() {
 		self::db()->query('TRUNCATE `watch_logs`;');
 	}
+
+	/**
+	 * Copy the watch folders of a restored backup into watch_folders — moved
+	 * here from core's migration, which no longer writes module tables. Only
+	 * into an empty table: the same rows handed over again (a reinstall) must
+	 * not add the folders twice.
+	 *
+	 * @param iterable<array<string, mixed>> $rRows   the backup's rows (LegacyTableMigrationEvent::rows())
+	 * @param string                         $rFormat `xui` or `xc` (an Xtream Codes backup keeps bouquet ids as JSON strings)
+	 * @return int folders copied; 0 when the table already had some
+	 */
+	public static function migrateLegacy(iterable $rRows, string $rFormat): int {
+		$db = self::db();
+		$db->query('SELECT COUNT(*) AS `count` FROM `watch_folders`;');
+		if ((int) ($db->get_row()['count'] ?? 0) > 0) {
+			return 0;
+		}
+		$rCopied = 0;
+		foreach ($rRows as $rRow) {
+			$rRow = QueryHelper::verifyPostTable('watch_folders', $rRow);
+			if ($rFormat === 'xc') {
+				foreach (['bouquets', 'fb_bouquets'] as $rKey) {
+					$rRow[$rKey] = '[' . implode(',', array_map('intval', (array) (json_decode((string) ($rRow[$rKey] ?? '[]'), true) ?: []))) . ']';
+				}
+			}
+			$rPrepare = QueryHelper::prepareArray($rRow);
+			if ($db->query('INSERT INTO `watch_folders`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');', ...$rPrepare['data'])) {
+				$rCopied++;
+			}
+		}
+		return $rCopied;
+	}
 }

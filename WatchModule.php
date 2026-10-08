@@ -5,6 +5,7 @@ namespace XcVm\Module\Watch;
 use XcVm\Cli\CommandRegistry;
 use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
 use XcVm\Core\Events\ListensTo;
+use XcVm\Core\Events\Migration\LegacyTableMigrationEvent;
 use XcVm\Core\Events\Stream\StreamsDeletedEvent;
 use XcVm\Core\Events\Vod\VodImportedEvent;
 use XcVm\Core\Events\Vod\VodImportResultEvent;
@@ -66,7 +67,7 @@ class WatchModule extends BaseModule {
     }
 
     public function getVersion(): string {
-        return '1.1.2';
+        return '1.1.3';
     }
 
     /**
@@ -98,6 +99,33 @@ class WatchModule extends BaseModule {
      * Log each file core's vod_import_item processed (folder scans and the
      * manual Movies/Series import alike) to watch_logs.
      */
+    /**
+     * The migration of a restored backup hands over the backup's watch_folders
+     * (core no longer writes this module's tables).
+     */
+    #[ListensTo(LegacyTableMigrationEvent::class)]
+    public function onLegacyTableMigration(LegacyTableMigrationEvent $rEvent): void {
+        if ($rEvent->table === 'watch_folders') {
+            $rEvent->copied = WatchService::migrateLegacy($rEvent->rows(), $rEvent->format);
+        }
+    }
+
+    /**
+     * Installed after a backup was migrated without it: take this module's
+     * folders from the file the migration saved them to (Modules/migration/),
+     * then remove it. A core without the event has nothing to hand over.
+     */
+    public function install(): void {
+        if (!class_exists(LegacyTableMigrationEvent::class)) {
+            return;
+        }
+        $rBackup = LegacyTableMigrationEvent::fromBackup('watch_folders');
+        if ($rBackup !== null) {
+            WatchService::migrateLegacy($rBackup->rows(), $rBackup->format);
+            $rBackup->discard();
+        }
+    }
+
     #[ListensTo(VodImportResultEvent::class)]
     public function onVodImportResult(VodImportResultEvent $rEvent): void {
         // ?? '': a core older than the event's title has no such property.
