@@ -175,4 +175,41 @@ final class WatchCronTest extends TestCase {
         \XcVm\Core\Config\SettingsManager::set(array());
         $this->assertSame(array(3600, 4, 0), WatchCron::scanSettings(array()), 'unset: hourly scans, 4 at a time, no limit');
     }
+
+    /**
+     * The `find` a local scan runs takes the folder as one argument, whatever
+     * it holds. It stood between double quotes through escapeshellcmd(), which
+     * leaves paired quotes alone: a folder path with two of them added
+     * arguments to find (-printf here; -delete or -exec the same way).
+     */
+    public function testAFoldersPathIsOneArgumentOfFind(): void {
+        $rDir = sys_get_temp_dir() . '/watch-find-' . bin2hex(random_bytes(4));
+        mkdir($rDir . '/sub', 0775, true);
+        touch($rDir . '/a.mkv');
+        touch($rDir . '/sub/b.MP4');
+        touch($rDir . '/c.txt');
+        try {
+            exec(WatchCron::findCommand($rDir, array('mkv', 'MP4')), $rFiles);
+            sort($rFiles);
+            $this->assertSame(array($rDir . '/a.mkv', $rDir . '/sub/b.MP4'), $rFiles);
+
+            exec(WatchCron::findCommand($rDir . '" -name "a.mkv" -printf "INJECTED:%f\n" -o -name "zz', array('mkv')) . ' 2>/dev/null', $rInjected);
+            $this->assertSame(array(), $rInjected, 'no such folder: nothing listed, nothing run');
+
+            exec(WatchCron::findCommand($rDir, array('mkv" -o -name "c.txt')), $rOdd);
+            $this->assertSame(array(), $rOdd, 'what is not an extension matches nothing');
+
+            exec(WatchCron::findCommand($rDir, array()), $rAll);
+            $this->assertContains($rDir . '/c.txt', $rAll, 'no extensions: every file');
+
+            $rBefore = getcwd();
+            chdir($rDir);
+            exec(WatchCron::findCommand('-delete', array('mkv')) . ' 2>/dev/null', $rDash);
+            chdir($rBefore);
+            $this->assertSame(array(), $rDash);
+            $this->assertFileExists($rDir . '/a.mkv', 'a path that is not absolute is never an option of find');
+        } finally {
+            exec('rm -rf ' . escapeshellarg($rDir));
+        }
+    }
 }

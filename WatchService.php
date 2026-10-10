@@ -48,8 +48,9 @@ class WatchService {
 			unset($rArray['id']);
 		}
 
-		$rPath = $rData['selected_path'];
-		if (!(0 < strlen($rPath) && $rPath != '/')) {
+		$rPath = (string) ($rData['selected_path'] ?? '');
+		// An absolute path, and not the root: the scan hands it to find.
+		if (!(0 < strlen($rPath) && $rPath != '/' && substr($rPath, 0, 1) === '/')) {
 			return array('status' => STATUS_INVALID_DIR, 'data' => $rData);
 		}
 

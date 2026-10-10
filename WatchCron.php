@@ -304,6 +304,32 @@ class WatchCron {
         return $rOut;
     }
 
+    /**
+     * The `find` that lists a folder's files with one of $rExtensions (every
+     * file when none is given). The folder is one argument whatever it holds:
+     * it stood between double quotes through escapeshellcmd(), which leaves
+     * paired quotes alone, so a path with two of them added arguments to find
+     * (-delete, -exec). An extension is letters and digits, or matches
+     * nothing, and a folder that is not an absolute path lists nothing (one
+     * starting with `-` would be read as an option).
+     *
+     * @param list<string> $rExtensions
+     */
+    public static function findCommand(string $rDirectory, array $rExtensions): string {
+        if (substr($rDirectory, 0, 1) !== '/') {
+            return '/usr/bin/find /dev/null -false';
+        }
+        $rCommand = '/usr/bin/find ' . escapeshellarg($rDirectory);
+        if (count($rExtensions) == 0) {
+            return $rCommand;
+        }
+        $rValid = array_values(array_filter(array_map('strval', $rExtensions), static fn(string $rExtension): bool => (bool) preg_match('/^[A-Za-z0-9]{1,16}\z/', $rExtension)));
+        if (count($rValid) == 0) {
+            return $rCommand . ' -false';
+        }
+        return $rCommand . ' -regex ' . escapeshellarg('.*\.\(' . implode('\|', $rValid) . '\)');
+    }
+
     /** Scan one folder of $rServerID and import its new files. */
     private static function scanFolder(array $rRow, $rServerID, array $rStreamDatabaseSet, array $rSettings, $rThreadCount, $rMaxFilesPerRun) {
         $db = self::db();
@@ -349,17 +375,12 @@ class WatchCron {
             $rFiles = array_keys($rTimes);
             $rSubtitles = $rListing['subtitles'];
         } else {
-            if (0 < count($rExtensions)) {
-                $rExtensions = escapeshellcmd(implode('|', $rExtensions));
-                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
-            } else {
-                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '"';
-            }
-            exec($rCommand, $rFiles);
+            // The folder is one escapeshellarg()'d argument and each extension letters and digits (findCommand()).
+            // nosemgrep: php.lang.security.exec-use.exec-use
+            exec(self::findCommand((string) $rRow['directory'], $rExtensions), $rFiles);
             if (isset($rRow['auto_subtitles'])) {
-                $rExtensions = escapeshellcmd(implode('|', self::SUBTITLE_EXTENSIONS));
-                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
-                exec($rCommand, $rSubtitles);
+                // nosemgrep: php.lang.security.exec-use.exec-use
+                exec(self::findCommand((string) $rRow['directory'], self::SUBTITLE_EXTENSIONS), $rSubtitles);
             } else {
                 $rSubtitles = array();
             }
