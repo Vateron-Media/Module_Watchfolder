@@ -284,7 +284,8 @@ class WatchController {
                             'type'        => (int) $rRow['type'],
                             'server_id'   => (int) $rRow['server_id'],
                             'server_name' => $rRow['server_name'],
-                            'filename'    => $rRow['filename'],
+                            // Stored HTML-escaped (logImportResult); the view escapes each cell.
+                            'filename'    => htmlspecialchars_decode((string) $rRow['filename'], ENT_QUOTES),
                             'title'       => (string) ($rRow['title'] ?? ''),
                             'status'      => (int) $rRow['status'],
                             'stream_id'   => isset($rRow['stream_id']) ? (int) $rRow['stream_id'] : 0,
