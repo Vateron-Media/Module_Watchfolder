@@ -15,13 +15,13 @@ final class WatchServiceTest extends TestCase {
     protected function setUp(): void {
         $this->db = new TestDb();
         $this->db->exec(
-            'CREATE TABLE watch_refresh (id INTEGER PRIMARY KEY AUTOINCREMENT, stream_id INTEGER);'
+            'CREATE TABLE watch_refresh (id INT PRIMARY KEY AUTO_INCREMENT, stream_id INTEGER);'
         );
         $this->db->exec(
-            'CREATE TABLE watch_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, server_id INTEGER, filename TEXT, title TEXT, status INTEGER, stream_id INTEGER);'
+            'CREATE TABLE watch_logs (id INT PRIMARY KEY AUTO_INCREMENT, type INTEGER, server_id INTEGER, filename TEXT, title TEXT, status INTEGER, stream_id INTEGER);'
         );
         $this->db->exec(
-            'CREATE TABLE watch_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, bouquets TEXT, fb_bouquets TEXT);'
+            'CREATE TABLE watch_folders (id INT PRIMARY KEY AUTO_INCREMENT, bouquets TEXT, fb_bouquets TEXT);'
         );
         WatchService::setDb($this->db);
     }
@@ -88,14 +88,15 @@ final class WatchServiceTest extends TestCase {
         $this->assertSame('4', (string) $this->db->get_col());
     }
 
-    public function testHandleStreamsDeletedRemovesRefreshAndLogRows(): void {
+    public function testHandleStreamsDeletedRemovesItsLogRowsOnly(): void {
         $this->db->query('INSERT INTO watch_refresh (id, stream_id) VALUES (1, 42);');
         $this->db->query("INSERT INTO watch_logs (type, server_id, filename, status, stream_id) VALUES (1, 1, 'x.mkv', 1, 42);");
 
         WatchService::handleStreamsDeleted(array(42));
 
+        // The TMDb refresh queue is core's since 2.6.3: core clears it, not this module.
         $this->db->query('SELECT COUNT(*) AS `count` FROM `watch_refresh`;');
-        $this->assertSame(0, (int) $this->db->get_col());
+        $this->assertSame(1, (int) $this->db->get_col());
         $this->db->query('SELECT COUNT(*) AS `count` FROM `watch_logs`;');
         $this->assertSame(0, (int) $this->db->get_col());
     }

@@ -5,6 +5,7 @@ namespace XcVm\Module\Watch;
 use XcVm\Core\Config\SettingsManager;
 use XcVm\Core\Database\QueryHelper;
 use XcVm\Core\Http\ApiClient;
+use XcVm\Core\Process\ProcessRunner;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
 
@@ -171,6 +172,10 @@ class WatchService {
 	}
 
 	public static function forceWatch($rServerID, $rWatchID) {
+		// A folder this server scans (its own, or on MAIN a cluster node's) runs here.
+		if (in_array(intval($rServerID), WatchCron::scannedServers(), true)) {
+			return ProcessRunner::start(array(PHP_BIN, MAIN_HOME . 'console.php', 'cron:watch', (string) intval($rWatchID)));
+		}
 		return ApiClient::systemRequest($rServerID, array('action' => 'watch_force', 'id' => $rWatchID));
 	}
 
@@ -185,9 +190,11 @@ class WatchService {
 	public static function killWatch() {
 		$db = self::db();
 		$db->query("SELECT DISTINCT(`server_id`) AS `server_id` FROM `watch_folders` WHERE `type` <> 'plex';");
-		foreach ($db->get_rows() as $rRow) {
-			if (ServerRepository::getAll()[$rRow['server_id']]['server_online']) {
-				ApiClient::systemRequest($rRow['server_id'], array('action' => 'kill_watch'));
+		// The folders this server scans for other servers import here: it is stopped too.
+		$rServers = array_unique(array_merge(array(intval(SERVER_ID)), array_map('intval', array_column($db->get_rows(), 'server_id'))));
+		foreach ($rServers as $rServerID) {
+			if (!empty(ServerRepository::getAll()[$rServerID]['server_online'])) {
+				ApiClient::systemRequest($rServerID, array('action' => 'kill_watch'));
 			}
 		}
 		return true;

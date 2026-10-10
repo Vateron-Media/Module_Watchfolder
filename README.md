@@ -28,9 +28,19 @@ The `watch` module scans configured folders (local paths or remote locations via
 - Core settings the import uses: `thread_count` (parallel imports), `percentage_match`, `max_genres`, `alternative_titles`, `fallback_parser` and the genre mapping (Settings → VOD Import); `parse_type`, `tmdb_language`, `download_images` (Settings).
 - Per folder: `auto_encode`, `auto_upgrade`, categories, bouquets and the other folder options.
 
+## Folders on a load balancer
+
+A load balancer in XC_VM's cluster API (mode 1 or 2) cannot scan its own folders: its settings come from MAIN's replica, which never carries the TMDb key, and in mode 2 it cannot reach MAIN's database. MAIN scans them instead:
+
+- `cron:watch` on MAIN takes its own folders and those of every enrolled node in mode 1 or 2. It lists each node folder through the node's system API (`scandir_recursive`), so the folder must lie under that node's Scan Roots (Settings → Cluster → Scan Roots).
+- New files are imported on MAIN for the node, as Movies → Import does: the movie or episode points at `s:<server>:<path>` and runs on that node (auto-encode queues there).
+- A file is taken once it has not been written to for 30 seconds: by its modification time from a node that lists times (XC_VM with the `stat` listing option), otherwise once two scans have seen it 30 seconds apart.
+- On such a node, `cron:watch` says MAIN scans its folders and stops. A folder's *Run now* on the panel starts the scan on MAIN.
+- Not available for node folders: *Extract metadata* and *Probe input* (ffprobe would run on MAIN, where the file is not), and *Auto upgrade*. Legacy load balancers (mode 0) still scan their own folders.
+
 ## Temporary files and caches
 
-- Uses `WATCH_TMP_PATH` for caches and coordination files: `movie_<tmdb>.cache`, `series_<tmdb>.cache`, `*.bouquet`, `*.wpid`, `lock_<id>`.
+- Uses `WATCH_TMP_PATH` for caches and coordination files: `movie_<tmdb>.cache`, `series_<tmdb>.cache`, `*.bouquet`, `*.wpid`, `lock_<id>`, and `seen_<folder>.json` (when a node folder was first seen, for nodes that list no times).
 
 ## Logs
 

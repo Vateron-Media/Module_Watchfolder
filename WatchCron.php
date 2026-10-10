@@ -2,8 +2,12 @@
 
 namespace XcVm\Module\Watch;
 
+use XcVm\Core\Cluster\NodeFlows;
+use XcVm\Core\Cluster\NodeRole;
 use XcVm\Core\Config\SettingsManager;
+use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Process\Multithread;
+use XcVm\Domain\Cluster\NodeRegistry;
 use XcVm\Domain\Vod\VodItemImporter;
 use XcVm\Domain\Stream\StreamRepository;
 
@@ -99,25 +103,27 @@ class WatchCron {
      *
      * @param array $rFolderRow Watch folder row from DB.
      * @param array $rExistingFiles Array of found file paths for the folder.
+     * @param int|null $rServerID The folder's server (null: this one).
      * @return void
      */
-    public static function cleanupMissing($rFolderRow, $rExistingFiles) {
+    public static function cleanupMissing($rFolderRow, $rExistingFiles, $rServerID = null) {
+        $rServerID = intval($rServerID ?? SERVER_ID);
         $db = self::db();
         $rTypeMap = array('movie' => 2, 'series' => 5);
         $rType = $rTypeMap[$rFolderRow['type']] ?? 0;
         if (!$rType) return;
         $rExistingLookup = array_flip($rExistingFiles);
         $rDir = rtrim($rFolderRow['directory'], '/') . '/';
-        $db->query('SELECT s.id, s.stream_source FROM streams s LEFT JOIN streams_servers ss ON ss.stream_id = s.id WHERE s.type = ? AND ss.server_id = ?', $rType, SERVER_ID);
+        $db->query('SELECT s.id, s.stream_source FROM streams s LEFT JOIN streams_servers ss ON ss.stream_id = s.id WHERE s.type = ? AND ss.server_id = ?', $rType, $rServerID);
         $rDeleted = 0;
         foreach ($db->get_rows() as $rStream) {
             $rSource = json_decode($rStream['stream_source'], true);
             if (!$rSource || empty($rSource[0])) continue;
-            $rPrefix = 's:' . SERVER_ID . ':';
+            $rPrefix = 's:' . $rServerID . ':';
             if (substr($rSource[0], 0, strlen($rPrefix)) !== $rPrefix) continue;
             $rFilePath = substr($rSource[0], strlen($rPrefix));
             if ($rFilePath && substr($rFilePath, 0, strlen($rDir)) === $rDir && !isset($rExistingLookup[$rFilePath])) {
-                StreamRepository::deleteStream($rStream['id'], SERVER_ID, true, true);
+                StreamRepository::deleteStream($rStream['id'], $rServerID, true, true);
                 $rDeleted++;
             }
         }
@@ -139,11 +145,39 @@ class WatchCron {
     }
 
     /**
+     * The servers whose watch folders this one scans: its own and, on MAIN,
+     * every load balancer enrolled in the cluster API (mode 1 or 2). Such a
+     * node reads its settings from MAIN's replica, which never carries the
+     * TMDb key, and in mode 2 cannot reach MAIN's database at all, so MAIN
+     * lists its folders through the node's system API and imports for it
+     * (scannedByMain() is the node's side of it).
+     *
+     * @return int[]
+     */
+    public static function scannedServers() {
+        $rServers = array(intval(SERVER_ID));
+        if (NodeRole::isMain() && class_exists(NodeRegistry::class)) {
+            foreach (NodeRegistry::enrolled() as $rServerID => $rNode) {
+                if (intval($rNode['mode'] ?? 0) >= 1) {
+                    $rServers[] = intval($rServerID);
+                }
+            }
+        }
+        return array_values(array_unique($rServers));
+    }
+
+    /** Does MAIN scan this server's watch folders (a node in mode 1 or 2)? */
+    public static function scannedByMain() {
+        return !NodeRole::isMain() && intval(NodeFlows::current()['mode'] ?? 0) >= 1;
+    }
+
+    /**
      * Run the watch cron.
      *
-     * Scans configured watch folders, prepares import jobs for newly
-     * discovered media files and dispatches processing commands. When
-     * `$rForce` is provided, only the folder with that ID is processed.
+     * Scans the watch folders of every server this one scans (scannedServers()),
+     * prepares import jobs for newly discovered media files and dispatches
+     * processing commands. When `$rForce` is provided, only the folder with
+     * that ID is processed.
      *
      * @param int|false $rForce Folder ID to force-run, or false to run normal schedule.
      * @return void
@@ -155,132 +189,249 @@ class WatchCron {
         if (count(glob(WATCH_TMP_PATH . '*.bouquet')) > 0) {
             self::checkBouquets();
         }
+        $rServers = self::scannedServers();
+        $rIn = implode(',', array_fill(0, count($rServers), '?'));
         if (!$rForce) {
-            $db->query("SELECT * FROM `watch_folders` WHERE `type` <> 'plex' AND `server_id` = ? AND `active` = 1 AND (UNIX_TIMESTAMP() - `last_run` > ? OR `last_run` IS NULL) ORDER BY `id` ASC;", SERVER_ID, $rScanOffset);
+            $db->query("SELECT * FROM `watch_folders` WHERE `type` <> 'plex' AND `server_id` IN (" . $rIn . ") AND `active` = 1 AND (UNIX_TIMESTAMP() - `last_run` > ? OR `last_run` IS NULL) ORDER BY `id` ASC;", ...array_merge($rServers, array($rScanOffset)));
         } else {
-            $db->query("SELECT * FROM `watch_folders` WHERE `type` <> 'plex' AND `server_id` = ? AND `id` = ?;", SERVER_ID, $rForce);
+            $db->query("SELECT * FROM `watch_folders` WHERE `type` <> 'plex' AND `server_id` IN (" . $rIn . ") AND `id` = ?;", ...array_merge($rServers, array($rForce)));
         }
-        $rRows = $db->get_rows();
-        if (count($rRows) > 0) {
+        $rByServer = array();
+        foreach ($db->get_rows() as $rRow) {
+            $rByServer[intval($rRow['server_id'])][] = $rRow;
+        }
+        if (count($rByServer) > 0) {
             shell_exec('rm -f ' . WATCH_TMP_PATH . '*.wpid');
-            $rSeriesTMDB = $rStreamDatabase = array();
-            $rTMDBDatabase = array('movie' => array(), 'series' => array());
-            echo 'Generating cache...' . "\n";
-            $db->query('SELECT `id`, `tmdb_id` FROM `streams_series` WHERE `tmdb_id` IS NOT NULL AND `tmdb_id` > 0;');
-            foreach ($db->get_rows() as $rRow) {
-                $rSeriesTMDB[$rRow['id']] = $rRow['tmdb_id'];
-            }
-            $db->query('SELECT `streams`.`id`, `streams_episodes`.`series_id`, `streams_episodes`.`season_num`, `streams_episodes`.`episode_num`, `streams`.`stream_source` FROM `streams_episodes` LEFT JOIN `streams` ON `streams`.`id` = `streams_episodes`.`stream_id` LEFT JOIN `streams_servers` ON `streams_servers`.`stream_id` = `streams`.`id` WHERE `streams_servers`.`server_id` = ?;', SERVER_ID);
-            foreach ($db->get_rows() as $rRow) {
-                $rStreamDatabase[] = $rRow['stream_source'];
-                $rTMDBID = $rSeriesTMDB[$rRow['series_id']];
-                if ($rTMDBID) {
-                    list($rSource) = json_decode($rRow['stream_source'], true);
-                    $rTMDBDatabase['series'][$rTMDBID][$rRow['season_num'] . '_' . $rRow['episode_num']] = array('id' => $rRow['id'], 'source' => $rSource);
-                }
-            }
-            $db->query('SELECT `streams`.`id`, `streams`.`stream_source`, `streams`.`movie_properties` FROM `streams` LEFT JOIN `streams_servers` ON `streams_servers`.`stream_id` = `streams`.`id` WHERE `streams`.`type` = 2 AND `streams_servers`.`server_id` = ?;', SERVER_ID);
-            foreach ($db->get_rows() as $rRow) {
-                $rStreamDatabase[] = $rRow['stream_source'];
-                $rTMDBID = (json_decode($rRow['movie_properties'], true)['tmdb_id'] ?: null);
-                if ($rTMDBID) {
-                    list($rSource) = json_decode($rRow['stream_source'], true);
-                    $rTMDBDatabase['movie'][$rTMDBID] = array('id' => $rRow['id'], 'source' => $rSource);
-                }
-            }
-            exec('find ' . WATCH_TMP_PATH . ' -maxdepth 1 -name "*.cache" -print0 | xargs -0 -r rm');
-            foreach ($rTMDBDatabase['series'] as $rTMDBID => $rData) {
-                file_put_contents(WATCH_TMP_PATH . 'series_' . $rTMDBID . '.cache', json_encode($rData));
-            }
-            foreach ($rTMDBDatabase['movie'] as $rTMDBID => $rData) {
-                file_put_contents(WATCH_TMP_PATH . 'movie_' . $rTMDBID . '.cache', json_encode($rData));
-            }
-            unset($rTMDBDatabase);
-            echo 'Finished generating cache!' . "\n";
         }
-        $rStreamDatabaseSet = array_flip($rStreamDatabase ?? array());
-        foreach ($rRows as $rRow) {
-            $db->query('UPDATE `watch_folders` SET `last_run` = UNIX_TIMESTAMP() WHERE `id` = ?;', $rRow['id']);
-            $rExtensions = json_decode($rRow['allowed_extensions'], true);
-            if (!$rExtensions) {
-                $rExtensions = array();
+        foreach ($rByServer as $rServerID => $rRows) {
+            $rStreamDatabaseSet = self::buildCaches($rServerID);
+            foreach ($rRows as $rRow) {
+                self::scanFolder($rRow, $rServerID, $rStreamDatabaseSet, $rSettings, $rThreadCount, $rMaxFilesPerRun);
             }
-            if (count($rExtensions) == 0) {
-                $rExtensions = self::DEFAULT_WATCH_EXTENSIONS;
+        }
+    }
+
+    /**
+     * One server's import caches: the TMDb ids of its movies and episodes
+     * (WATCH_TMP_PATH, read by the importer for duplicates and upgrades) and
+     * the sources it already has, as a set.
+     *
+     * @return array<string, int> json_encode(stream_source) => index
+     */
+    private static function buildCaches($rServerID) {
+        $db = self::db();
+        $rSeriesTMDB = $rStreamDatabase = array();
+        $rTMDBDatabase = array('movie' => array(), 'series' => array());
+        echo 'Generating cache...' . "\n";
+        $db->query('SELECT `id`, `tmdb_id` FROM `streams_series` WHERE `tmdb_id` IS NOT NULL AND `tmdb_id` > 0;');
+        foreach ($db->get_rows() as $rRow) {
+            $rSeriesTMDB[$rRow['id']] = $rRow['tmdb_id'];
+        }
+        $db->query('SELECT `streams`.`id`, `streams_episodes`.`series_id`, `streams_episodes`.`season_num`, `streams_episodes`.`episode_num`, `streams`.`stream_source` FROM `streams_episodes` LEFT JOIN `streams` ON `streams`.`id` = `streams_episodes`.`stream_id` LEFT JOIN `streams_servers` ON `streams_servers`.`stream_id` = `streams`.`id` WHERE `streams_servers`.`server_id` = ?;', $rServerID);
+        foreach ($db->get_rows() as $rRow) {
+            $rStreamDatabase[] = $rRow['stream_source'];
+            $rTMDBID = $rSeriesTMDB[$rRow['series_id']] ?? null;
+            if ($rTMDBID) {
+                list($rSource) = json_decode($rRow['stream_source'], true);
+                $rTMDBDatabase['series'][$rTMDBID][$rRow['season_num'] . '_' . $rRow['episode_num']] = array('id' => $rRow['id'], 'source' => $rSource);
             }
-            $rSubtitles = $rFiles = array();
-            if (0 < strlen($rRow['rclone_dir'])) {
-                $rCommand = 'rclone --config "' . CONFIG_PATH . 'rclone.conf" lsjson ' . escapeshellarg($rRow['rclone_dir']) . ' -R --fast-list --files-only';
-                exec($rCommand, $rRcloneFiles);
-                $rData = implode(' ', $rRcloneFiles);
-                if (substr($rData, 0, 1) !== '[') {
-                    $rData = '[' . explode('[', $rData, 2)[1];
+        }
+        $db->query('SELECT `streams`.`id`, `streams`.`stream_source`, `streams`.`movie_properties` FROM `streams` LEFT JOIN `streams_servers` ON `streams_servers`.`stream_id` = `streams`.`id` WHERE `streams`.`type` = 2 AND `streams_servers`.`server_id` = ?;', $rServerID);
+        foreach ($db->get_rows() as $rRow) {
+            $rStreamDatabase[] = $rRow['stream_source'];
+            $rTMDBID = (json_decode($rRow['movie_properties'], true)['tmdb_id'] ?? null) ?: null;
+            if ($rTMDBID) {
+                list($rSource) = json_decode($rRow['stream_source'], true);
+                $rTMDBDatabase['movie'][$rTMDBID] = array('id' => $rRow['id'], 'source' => $rSource);
+            }
+        }
+        exec('find ' . WATCH_TMP_PATH . ' -maxdepth 1 -name "*.cache" -print0 | xargs -0 -r rm');
+        foreach ($rTMDBDatabase['series'] as $rTMDBID => $rData) {
+            file_put_contents(WATCH_TMP_PATH . 'series_' . $rTMDBID . '.cache', json_encode($rData));
+        }
+        foreach ($rTMDBDatabase['movie'] as $rTMDBID => $rData) {
+            file_put_contents(WATCH_TMP_PATH . 'movie_' . $rTMDBID . '.cache', json_encode($rData));
+        }
+        echo 'Finished generating cache!' . "\n";
+        return array_flip($rStreamDatabase);
+    }
+
+    /**
+     * A load balancer's folder through its system API: its media files as
+     * path => modification time (null each, from a node that predates the
+     * listing's `stat` option) and its subtitle files. Null when the node did
+     * not answer or refused the folder (it lists only under its Scan Roots).
+     *
+     * @return array{files: array<string, int|null>, subtitles: list<string>}|null
+     */
+    private static function remoteListing($rServerID, array $rRow, array $rExtensions) {
+        $rFiles = ApiClient::scanRecursive($rServerID, $rRow['directory'], $rExtensions, true);
+        if (!is_array($rFiles) || ($rFiles['result'] ?? null) === false) {
+            return null;
+        }
+        if (array_is_list($rFiles)) {
+            $rFiles = array_fill_keys(array_map('strval', $rFiles), null);
+        }
+        $rSubtitles = array();
+        if (isset($rRow['auto_subtitles'])) {
+            $rFound = ApiClient::scanRecursive($rServerID, $rRow['directory'], self::SUBTITLE_EXTENSIONS);
+            $rSubtitles = is_array($rFound) && array_is_list($rFound) ? array_map('strval', $rFound) : array();
+        }
+        return array('files' => $rFiles, 'subtitles' => $rSubtitles);
+    }
+
+    /**
+     * The files of a folder listed without times that have now been seen for
+     * FILE_STABLE_SECONDS: the stand-in for "not written to lately" on a node
+     * whose listing has no times. Kept per folder in WATCH_TMP_PATH; a file no
+     * longer listed is forgotten.
+     *
+     * @param string[] $rFiles
+     * @return array<string, true>
+     */
+    public static function settled($rFolderID, array $rFiles, $rNow) {
+        $rPath = WATCH_TMP_PATH . 'seen_' . intval($rFolderID) . '.json';
+        $rSeen = json_decode((string) @file_get_contents($rPath), true);
+        $rSeen = is_array($rSeen) ? $rSeen : array();
+        $rNext = $rOut = array();
+        foreach ($rFiles as $rFile) {
+            $rNext[$rFile] = intval($rSeen[$rFile] ?? $rNow);
+            if ($rNow - $rNext[$rFile] >= self::FILE_STABLE_SECONDS) {
+                $rOut[$rFile] = true;
+            }
+        }
+        file_put_contents($rPath, json_encode($rNext, JSON_UNESCAPED_UNICODE));
+        return $rOut;
+    }
+
+    /** Scan one folder of $rServerID and import its new files. */
+    private static function scanFolder(array $rRow, $rServerID, array $rStreamDatabaseSet, array $rSettings, $rThreadCount, $rMaxFilesPerRun) {
+        $db = self::db();
+        // Another server's folder: MAIN lists it through the node and imports for it.
+        $rRemote = $rServerID !== intval(SERVER_ID);
+        $db->query('UPDATE `watch_folders` SET `last_run` = UNIX_TIMESTAMP() WHERE `id` = ?;', $rRow['id']);
+        $rExtensions = json_decode($rRow['allowed_extensions'], true);
+        if (!$rExtensions) {
+            $rExtensions = array();
+        }
+        if (count($rExtensions) == 0) {
+            $rExtensions = self::DEFAULT_WATCH_EXTENSIONS;
+        }
+        $rSubtitles = $rFiles = array();
+        $rTimes = null;
+        if (0 < strlen($rRow['rclone_dir'])) {
+            $rCommand = 'rclone --config "' . CONFIG_PATH . 'rclone.conf" lsjson ' . escapeshellarg($rRow['rclone_dir']) . ' -R --fast-list --files-only';
+            exec($rCommand, $rRcloneFiles);
+            $rData = implode(' ', $rRcloneFiles);
+            if (substr($rData, 0, 1) !== '[') {
+                $rData = '[' . explode('[', $rData, 2)[1];
+            }
+            $rRcloneFiles = json_decode($rData, true);
+            foreach ($rRcloneFiles as $rFile) {
+                $rFile['Path'] = rtrim($rRow['directory'], '/') . '/' . $rFile['Path'];
+                if (count($rExtensions) == 0 || in_array(strtolower(pathinfo($rFile['Name'])['extension']), $rExtensions)) {
+                    $rFiles[] = $rFile['Path'];
                 }
-                $rRcloneFiles = json_decode($rData, true);
-                foreach ($rRcloneFiles as $rFile) {
-                    $rFile['Path'] = rtrim($rRow['directory'], '/') . '/' . $rFile['Path'];
-                    if (count($rExtensions) == 0 || in_array(strtolower(pathinfo($rFile['Name'])['extension']), $rExtensions)) {
-                        $rFiles[] = $rFile['Path'];
-                    }
-                    if (isset($rRow['auto_subtitles'])) {
-                        if (in_array(strtolower(pathinfo($rFile['Path'])['extension']), self::SUBTITLE_EXTENSIONS)) {
-                            $rSubtitles[] = $rFile['Path'];
-                        }
-                    }
-                }
-            } else {
-                if (0 < count($rExtensions)) {
-                    $rExtensions = escapeshellcmd(implode('|', $rExtensions));
-                    $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
-                } else {
-                    $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '"';
-                }
-                exec($rCommand, $rFiles);
                 if (isset($rRow['auto_subtitles'])) {
-                    $rExtensions = escapeshellcmd(implode('|', self::SUBTITLE_EXTENSIONS));
-                    $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
-                    exec($rCommand, $rSubtitles);
-                } else {
-                    $rSubtitles = array();
+                    if (in_array(strtolower(pathinfo($rFile['Path'])['extension']), self::SUBTITLE_EXTENSIONS)) {
+                        $rSubtitles[] = $rFile['Path'];
+                    }
                 }
             }
-            $rSubtitlesSet = array_flip($rSubtitles);
-            $rThreadData = array();
-            foreach ($rFiles as $rFile) {
-                if (time() - filemtime($rFile) >= self::FILE_STABLE_SECONDS) {
-                    if (!isset($rStreamDatabaseSet[json_encode(array('s:' . SERVER_ID . ':' . $rFile), JSON_UNESCAPED_UNICODE)])) {
-                        $rPathInfo = pathinfo($rFile);
-                        $rSubtitleData = array();
-                        if (isset($rRow['auto_subtitles'])) {
-                            foreach (self::SUBTITLE_EXTENSIONS as $rExt) {
-                                $rSubtitle = $rPathInfo['dirname'] . '/' . $rPathInfo['filename'] . '.' . $rExt;
-                                if (isset($rSubtitlesSet[$rSubtitle])) {
-                                    $rSubtitleData = array('files' => array($rSubtitle), 'names' => array('Subtitles'), 'charset' => array('UTF-8'), 'location' => SERVER_ID);
-                                    break;
-                                }
+        } elseif ($rRemote) {
+            $rListing = self::remoteListing($rServerID, $rRow, $rExtensions);
+            if ($rListing === null) {
+                // Nothing listed is not "every file is gone": no cleanup either.
+                echo 'Server #' . $rServerID . ' did not list ' . $rRow['directory'] . ' (offline, or outside its Scan Roots).' . "\n";
+                return;
+            }
+            $rTimes = $rListing['files'];
+            $rFiles = array_keys($rTimes);
+            $rSubtitles = $rListing['subtitles'];
+        } else {
+            if (0 < count($rExtensions)) {
+                $rExtensions = escapeshellcmd(implode('|', $rExtensions));
+                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
+            } else {
+                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '"';
+            }
+            exec($rCommand, $rFiles);
+            if (isset($rRow['auto_subtitles'])) {
+                $rExtensions = escapeshellcmd(implode('|', self::SUBTITLE_EXTENSIONS));
+                $rCommand = '/usr/bin/find "' . escapeshellcmd($rRow['directory']) . '" -regex ".*\\.\\(' . $rExtensions . '\\)"';
+                exec($rCommand, $rSubtitles);
+            } else {
+                $rSubtitles = array();
+            }
+        }
+        $rNow = time();
+        $rSettled = ($rTimes !== null && in_array(null, $rTimes, true)) ? self::settled($rRow['id'], $rFiles, $rNow) : array();
+        $rThreadData = self::importItems($rRow, $rServerID, $rFiles, $rTimes, $rSettled, $rSubtitles, $rStreamDatabaseSet, $rSettings, $rMaxFilesPerRun, $rNow);
+        if (count($rThreadData) > 0) {
+            echo 'Scan complete! Adding ' . count($rThreadData) . ' files...' . "\n";
+        }
+        $rCommands = array();
+        foreach ($rThreadData as $rData) {
+            $rCommands[] = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php vod_import_item ' . escapeshellarg(base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)));
+        }
+        $db->close_mysql();
+        Multithread::pool($rCommands, $rThreadCount);
+        $db->db_connect();
+        if (!empty($rRow['delete_missing'])) {
+            self::cleanupMissing($rRow, $rFiles, $rServerID);
+        }
+        self::checkBouquets();
+    }
+
+    /**
+     * The import jobs for a folder's new files: those settled (not written to
+     * for FILE_STABLE_SECONDS, by their time, or by settled() when the listing
+     * had none) and not yet a stream of $rServerID. Another server's file is
+     * imported for it (import mode, `s:<server>:<path>`, no ffprobe here).
+     *
+     * @param string[] $rFiles
+     * @param array<string, int|null>|null $rTimes a remote listing's times; null: stat the files here
+     * @param array<string, true> $rSettled
+     * @param string[] $rSubtitles
+     * @return list<array<string, mixed>>
+     */
+    public static function importItems(array $rRow, $rServerID, array $rFiles, $rTimes, array $rSettled, array $rSubtitles, array $rStreamDatabaseSet, array $rSettings, $rMaxFilesPerRun, $rNow) {
+        $rRemote = $rServerID !== intval(SERVER_ID);
+        $rSubtitlesSet = array_flip($rSubtitles);
+        $rThreadData = array();
+        foreach ($rFiles as $rFile) {
+            if ($rTimes !== null) {
+                $rStable = $rTimes[$rFile] !== null ? $rNow - $rTimes[$rFile] >= self::FILE_STABLE_SECONDS : isset($rSettled[$rFile]);
+            } else {
+                $rStable = $rNow - (int) @filemtime($rFile) >= self::FILE_STABLE_SECONDS;
+            }
+            if ($rStable) {
+                if (!isset($rStreamDatabaseSet[json_encode(array('s:' . $rServerID . ':' . $rFile), JSON_UNESCAPED_UNICODE)])) {
+                    $rPathInfo = pathinfo($rFile);
+                    $rSubtitleData = array();
+                    if (isset($rRow['auto_subtitles'])) {
+                        foreach (self::SUBTITLE_EXTENSIONS as $rExt) {
+                            $rSubtitle = $rPathInfo['dirname'] . '/' . $rPathInfo['filename'] . '.' . $rExt;
+                            if (isset($rSubtitlesSet[$rSubtitle])) {
+                                $rSubtitleData = array('files' => array($rSubtitle), 'names' => array('Subtitles'), 'charset' => array('UTF-8'), 'location' => $rServerID);
+                                break;
                             }
                         }
-                        $rThreadData[] = array('type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
-                        if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
-                            break;
-                        }
+                    }
+                    $rData = array('type' => $rRow['type'], 'directory' => $rRow['directory'], 'file' => $rFile, 'subtitles' => $rSubtitleData, 'category_id' => $rRow['category_id'], 'bouquets' => $rRow['bouquets'], 'disable_tmdb' => $rRow['disable_tmdb'], 'ignore_no_match' => $rRow['ignore_no_match'], 'fb_bouquets' => $rRow['fb_bouquets'], 'fb_category_id' => $rRow['fb_category_id'], 'language' => $rRow['language'], 'read_native' => $rRow['read_native'], 'movie_symlink' => $rRow['movie_symlink'], 'remove_subtitles' => $rRow['remove_subtitles'], 'auto_encode' => $rRow['auto_encode'], 'auto_upgrade' => $rRow['auto_upgrade'], 'fallback_title' => $rRow['fallback_title'], 'ffprobe_input' => $rRow['ffprobe_input'], 'extract_metadata' => $rRow['extract_metadata'], 'transcode_profile_id' => $rRow['transcode_profile_id'], 'max_genres' => intval($rSettings['max_genres']), 'duplicate_tmdb' => $rRow['duplicate_tmdb'], 'target_container' => $rRow['target_container'], 'alternative_titles' => $rSettings['alternative_titles'], 'fallback_parser' => $rSettings['fallback_parser']);
+                    if ($rRemote) {
+                        // Imported here for that server, as Movies → Import does: the stream
+                        // points at its file and runs there. ffprobe would run here, where the
+                        // file is not, so the match is on the file name.
+                        $rData = array_merge($rData, array('import' => true, 'file' => 's:' . $rServerID . ':' . $rFile, 'servers' => array($rServerID), 'ffprobe_input' => 0, 'extract_metadata' => 0));
+                    }
+                    $rThreadData[] = $rData;
+                    if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
+                        break;
                     }
                 }
             }
-            if (count($rThreadData) > 0) {
-                echo 'Scan complete! Adding ' . count($rThreadData) . ' files...' . "\n";
-            }
-            $rCommands = array();
-            foreach ($rThreadData as $rData) {
-                $rCommands[] = '/usr/bin/timeout 60 ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php vod_import_item ' . escapeshellarg(base64_encode(json_encode($rData, JSON_UNESCAPED_UNICODE)));
-            }
-            $db->close_mysql();
-            Multithread::pool($rCommands, $rThreadCount);
-            $db->db_connect();
-            if (!empty($rRow['delete_missing'])) {
-                self::cleanupMissing($rRow, $rFiles);
-            }
-            self::checkBouquets();
         }
+        return $rThreadData;
     }
 }
