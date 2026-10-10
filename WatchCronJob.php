@@ -64,7 +64,13 @@ class WatchCronJob implements CommandInterface {
         $this->setProcessTitle('XC_VM[Watch Folder]');
 
         set_time_limit(0);
-        if (strlen(SettingsManager::getAll()['tmdb_api_key']) != 0) {
+        if (WatchCron::scannedByMain()) {
+            // A node in the cluster API has no TMDb key and, in mode 2, no database:
+            // MAIN lists this server's folders through its system API and imports for it.
+            echo 'Watch folders on this server are scanned by MAIN.' . "\n";
+            return 0;
+        }
+        if (strlen((string) (SettingsManager::getAll()['tmdb_api_key'] ?? '')) != 0) {
             WatchCron::run($rForce);
         } else {
             echo 'No TMDb API key.' . "\n";

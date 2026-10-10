@@ -22,7 +22,7 @@ final class WatchCronTest extends TestCase {
         // minimal — just the columns referenced in its WHERE/SET clauses —
         // so the regression test below exercises the real deletion path
         // instead of a re-implementation of cleanupMissing()'s own SQL).
-        $this->db->exec('CREATE TABLE streams (id INTEGER PRIMARY KEY AUTOINCREMENT, type INTEGER, stream_source TEXT);');
+        $this->db->exec('CREATE TABLE streams (id INT PRIMARY KEY AUTO_INCREMENT, type INTEGER, stream_source TEXT);');
         $this->db->exec('CREATE TABLE streams_servers (stream_id INTEGER, server_id INTEGER, server_stream_id INTEGER, parent_id INTEGER);');
         $this->db->exec('CREATE TABLE servers (id INTEGER PRIMARY KEY, server_type INTEGER);');
         $this->db->exec('CREATE TABLE lines_logs (stream_id INTEGER);');
@@ -36,6 +36,8 @@ final class WatchCronTest extends TestCase {
         $this->db->exec('CREATE TABLE lines_activity (stream_id INTEGER);');
         $this->db->exec('CREATE TABLE signals (server_id INTEGER, time INTEGER, custom_data TEXT, cache INTEGER);');
         $this->db->exec('CREATE TABLE bouquets (id INTEGER PRIMARY KEY, bouquet_movies TEXT, bouquet_series TEXT);');
+        // Core's TMDb refresh queue (2.6.3), which deleteStream() empties too.
+        $this->db->exec('CREATE TABLE watch_refresh (id INT PRIMARY KEY AUTO_INCREMENT, stream_id INT);');
         WatchCron::setDb($this->db);
         \XcVm\Domain\Stream\StreamRepository::setDb($this->db);
         \XcVm\Domain\Vod\MovieService::setDb($this->db);
