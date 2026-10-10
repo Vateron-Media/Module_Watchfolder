@@ -235,8 +235,8 @@ class WatchService {
 	 */
 	public static function handleCategoryDeleted($rCategoryID) {
 		$db = self::db();
-		$db->query('UPDATE `watch_folders` SET `category_id` = null WHERE `category_id` = ?;', (int) $rCategoryID);
-		$db->query('UPDATE `watch_folders` SET `fb_category_id` = null WHERE `fb_category_id` = ?;', (int) $rCategoryID);
+		$db->query('UPDATE `watch_folders` SET `category_id` = 0 WHERE `category_id` = ?;', (int) $rCategoryID);
+		$db->query('UPDATE `watch_folders` SET `fb_category_id` = 0 WHERE `fb_category_id` = ?;', (int) $rCategoryID);
 	}
 
 	/**
@@ -322,31 +322,45 @@ class WatchService {
 	 * Copy the watch folders of a restored backup into watch_folders — moved
 	 * here from core's migration, which no longer writes module tables. Only
 	 * into an empty table: the same rows handed over again (a reinstall) must
-	 * not add the folders twice.
+	 * not add the folders twice. All or nothing: one refused row rolls the
+	 * copy back.
+	 *
+	 * Null when nothing was taken (the table already has folders, or a row was
+	 * refused): the backup's file must then be kept — core discards it as soon
+	 * as `copied` is a number.
 	 *
 	 * @param iterable<array<string, mixed>> $rRows   the backup's rows (LegacyTableMigrationEvent::rows())
 	 * @param string                         $rFormat `xui` or `xc` (an Xtream Codes backup keeps bouquet ids as JSON strings)
-	 * @return int folders copied; 0 when the table already had some
+	 * @return int|null folders copied; null when none were taken
 	 */
-	public static function migrateLegacy(iterable $rRows, string $rFormat): int {
+	public static function migrateLegacy(iterable $rRows, string $rFormat): ?int {
 		$db = self::db();
 		$db->query('SELECT COUNT(*) AS `count` FROM `watch_folders`;');
 		if ((int) ($db->get_row()['count'] ?? 0) > 0) {
-			return 0;
+			error_log('watchfolder: watch_folders already has folders; the backup\'s stay in Modules/migration/watch_folders.sql');
+			return null;
 		}
-		$rCopied = 0;
-		foreach ($rRows as $rRow) {
-			$rRow = QueryHelper::verifyPostTable('watch_folders', $rRow);
-			if ($rFormat === 'xc') {
-				foreach (['bouquets', 'fb_bouquets'] as $rKey) {
-					$rRow[$rKey] = '[' . implode(',', array_map('intval', (array) (json_decode((string) ($rRow[$rKey] ?? '[]'), true) ?: []))) . ']';
+		try {
+			return $db->transactional(static function ($db) use ($rRows, $rFormat): int {
+				$rCopied = 0;
+				foreach ($rRows as $rRow) {
+					$rRow = QueryHelper::verifyPostTable('watch_folders', $rRow);
+					if ($rFormat === 'xc') {
+						foreach (['bouquets', 'fb_bouquets'] as $rKey) {
+							$rRow[$rKey] = '[' . implode(',', array_map('intval', (array) (json_decode((string) ($rRow[$rKey] ?? '[]'), true) ?: []))) . ']';
+						}
+					}
+					$rPrepare = QueryHelper::prepareArray($rRow);
+					if (!$db->query('INSERT INTO `watch_folders`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');', ...$rPrepare['data'])) {
+						throw new \RuntimeException('folder ' . ($rRow['id'] ?? '?') . ' was refused');
+					}
+					$rCopied++;
 				}
-			}
-			$rPrepare = QueryHelper::prepareArray($rRow);
-			if ($db->query('INSERT INTO `watch_folders`(' . $rPrepare['columns'] . ') VALUES(' . $rPrepare['placeholder'] . ');', ...$rPrepare['data'])) {
-				$rCopied++;
-			}
+				return $rCopied;
+			});
+		} catch (\RuntimeException $e) {
+			error_log('watchfolder: backup folders not copied (' . $e->getMessage() . '); they stay in Modules/migration/watch_folders.sql');
+			return null;
 		}
-		return $rCopied;
 	}
 }
