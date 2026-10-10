@@ -69,6 +69,32 @@ final class WatchServiceTest extends TestCase {
         $this->assertSame(array('Les Psys (2026) - S01E01', null), array_column($this->db->get_rows(), 'title'));
     }
 
+    /**
+     * A file imported for another server (MAIN's scan of a load balancer's
+     * folder) comes from the server that ran the import, as "s:<server>:<path>":
+     * it is logged against its own server, by its path, as that server's own
+     * scan would log it. The log's server column, its Manual Match link and
+     * markImported() all read it that way.
+     */
+    public function testAFileImportedForAnotherServerIsLoggedAgainstIt(): void {
+        WatchService::logImportResult(1, 1, 's:2:/mnt/films/Tom & Jerry.mkv', 4);
+        WatchService::logImportResult(1, 1, 'http://host/movie/1.mkv', 4);
+
+        $this->db->query('SELECT `server_id`, `filename` FROM `watch_logs` ORDER BY `id` ASC;');
+        $rRows = $this->db->get_rows();
+        $this->assertSame(array(2, '/mnt/films/Tom &amp; Jerry.mkv'), array((int) $rRows[0]['server_id'], $rRows[0]['filename']));
+        $this->assertSame(array(1, 'http://host/movie/1.mkv'), array((int) $rRows[1]['server_id'], $rRows[1]['filename']), 'a URL is no server\'s file');
+
+        WatchService::markImported(42, '/mnt/films/Tom & Jerry.mkv', 1);
+        $this->db->query('SELECT `status`, `stream_id` FROM `watch_logs` WHERE `server_id` = 2;');
+        $rRow = $this->db->get_row();
+        $this->assertSame(array(1, 42), array((int) $rRow['status'], (int) $rRow['stream_id']), 'a manual match finds the row');
+
+        WatchService::logImportResult(1, 1, 's:2:/mnt/films/Tom & Jerry.mkv', 1, 43);
+        $this->db->query('SELECT COUNT(*) AS `n` FROM `watch_logs` WHERE `server_id` = 2;');
+        $this->assertSame(1, (int) $this->db->get_row()['n'], 'the file\'s earlier row is replaced');
+    }
+
     public function testMarkImportedFindsARowLoggedWithSpecialCharacters(): void {
         WatchService::logImportResult(1, 1, "/media/Tom & Jerry's.mkv", 4);
 
