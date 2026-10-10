@@ -1,7 +1,7 @@
 <?php
 
 use XcVm\Core\Events\EventDispatcher;
-use XcVm\Module\Watch\WatchCron;
+use XcVm\Module\Watchfolder\WatchCron;
 use PHPUnit\Framework\TestCase;
 
 /**

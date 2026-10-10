@@ -1,6 +1,6 @@
 <?php
 
-namespace XcVm\Module\Watch;
+namespace XcVm\Module\Watchfolder;
 
 use XcVm\Core\Auth\Authorization;
 use XcVm\Core\Http\RequestManager;
@@ -22,7 +22,7 @@ use XcVm\Infrastructure\Database\DatabaseFactory;
  * - API: enable/disable/kill/folder actions
  *
  * @see WatchService
- * @see WatchModule
+ * @see WatchfolderModule
  *
  * @package XC_VM_Module_Watch
  * @author  Divarion_D <https://github.com/Divarion-D>
@@ -225,7 +225,7 @@ class WatchController {
     /**
      * serverSide DataTable builder for the 'watch_output' table.
      *
-     * Registered with the core TableRegistry (see WatchModule::registerTables)
+     * Registered with the core TableRegistry (see WatchfolderModule::registerTables)
      * so this module owns its table instead of the id living in core
      * TableController. Returns clean, keyed JSON — the watch_output view renders
      * every cell client-side. Must NOT echo/exit (TableController encodes it).
