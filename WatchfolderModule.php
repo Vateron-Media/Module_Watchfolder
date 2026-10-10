@@ -1,6 +1,6 @@
 <?php
 
-namespace XcVm\Module\Watch;
+namespace XcVm\Module\Watchfolder;
 
 use XcVm\Cli\CommandRegistry;
 use XcVm\Core\Events\Bouquet\BouquetDeletedEvent;
@@ -62,10 +62,10 @@ use XcVm\Core\Module\TopbarRegistry;
  * @license AGPL-3.0 https://www.gnu.org/licenses/agpl-3.0.html
  */
 
-class WatchModule extends BaseModule {
+class WatchfolderModule extends BaseModule {
 
     public function getName(): string {
-        return 'watch';
+        return 'watchfolder';
     }
 
     public function getVersion(): string {

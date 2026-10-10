@@ -1,10 +1,10 @@
-# Watch module
+# Watchfolder module
 
 Automatic folder watcher for media files.
 
 ## Overview
 
-The `watch` module scans configured folders (local paths or remote locations via `rclone`) for new movie and TV episode files, attempts to identify them using release parsers and TMDb, and imports matching items into the system as `streams` (movies) or `streams_series`/`streams_episodes` (TV). It can also update existing streams (upgrade source), add items to bouquets, enqueue auto-encoding, and download artwork.
+The `watchfolder` module scans configured folders (local paths or remote locations via `rclone`) for new movie and TV episode files, attempts to identify them using release parsers and TMDb, and imports matching items into the system as `streams` (movies) or `streams_series`/`streams_episodes` (TV). It can also update existing streams (upgrade source), add items to bouquets, enqueue auto-encoding, and download artwork.
 
 ## Key features
 

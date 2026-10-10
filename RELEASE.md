@@ -1,6 +1,6 @@
 # Module_Watch Release Preparation Checklist
 
-Step-by-step guide for preparing and publishing a release of the `watch` module.
+Step-by-step guide for preparing and publishing a release of the `watchfolder` module.
 
 How releases work here: the panel's weekly cron (`cron:module_updates`) reads this
 repo's releases, and `ModuleManager::updateModuleFromSource()` downloads the asset
@@ -32,12 +32,12 @@ The module declares its version twice. **Keep them identical:**
 | Place | What to edit |
 | --- | --- |
 | `module.json` | `"version": "X.Y.Z"` |
-| `WatchModule.php` | `getVersion()` return value |
+| `WatchfolderModule.php` | `getVersion()` return value |
 
 ```bash
 sed -i "s/\"version\": *\"[0-9.]*\"/\"version\": \"${VERSION}\"/" module.json
-sed -i "s/return '[0-9.]*'; *$/return '${VERSION}';/" WatchModule.php
-grep -n "$VERSION" module.json WatchModule.php   # verify both hit
+sed -i "s/return '[0-9.]*'; *$/return '${VERSION}';/" WatchfolderModule.php
+grep -n "$VERSION" module.json WatchfolderModule.php   # verify both hit
 ```
 
 Also check:
@@ -113,7 +113,7 @@ npx git-cliff --unreleased --strip header
 ## 6. Single Release Commit
 
 ```bash
-git add module.json WatchModule.php migrations/ database.sql database_drop.sql
+git add module.json WatchfolderModule.php migrations/ database.sql database_drop.sql
 git commit -m "Prepare release ${VERSION}"
 git push
 ```

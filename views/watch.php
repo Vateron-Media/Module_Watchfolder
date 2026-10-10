@@ -1,6 +1,6 @@
 <?php
 
-use XcVm\Module\Watch\WatchService;
+use XcVm\Module\Watchfolder\WatchService;
 
 ?>
 <?php if (isset($_STATUS) && $_STATUS == STATUS_SUCCESS) : ?>
