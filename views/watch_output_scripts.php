@@ -9,7 +9,7 @@
 		var canServers = <?= \XcVm\Core\Auth\Authorization::check('adv', 'servers') ? 'true' : 'false'; ?>;
 		var canEditMovie = <?= \XcVm\Core\Auth\Authorization::check('adv', 'edit_movie') ? 'true' : 'false'; ?>;
 		var canEditEpisode = <?= \XcVm\Core\Auth\Authorization::check('adv', 'edit_episode') ? 'true' : 'false'; ?>;
-		var WATCH_STATUS = { 1: ["success", "ADDED"], 2: ["danger", "SQL FAILED"], 3: ["danger", "NO CATEGORY"], 4: ["danger", "NO TMDb MATCH"], 5: ["danger", "INVALID FILE"], 6: ["info", "UPGRADED"] };
+		var WATCH_STATUS = { 1: ["success", "ADDED"], 2: ["danger", "SQL FAILED"], 3: ["danger", "NO CATEGORY"], 4: ["danger", "NO TMDb MATCH"], 5: ["danger", "INVALID FILE"], 6: ["info", "UPGRADED"], 7: ["secondary", "DUPLICATE"] };
 		function esc(v) { return $("<div>").text(v == null ? "" : v).html(); }
 		function typeCell(d) { return d == 1 ? "Movies" : (d == 2 ? "Series" : ""); }
 		function serverCell(d, t, row) { return canServers ? '<a href="server_view?id=' + row.server_id + '">' + esc(row.server_name) + '</a>' : esc(row.server_name); }

@@ -28,7 +28,7 @@
 					<label class="form-label" for="result_status">Status</label>
 					<select id="result_status" class="form-select">
 						<option value="" selected>All Statuses</option>
-						<?php foreach (array(1 => 'Added', 2 => 'SQL Error', 3 => 'No Category', 4 => 'No Match', 5 => 'Invalid File') as $rID => $rType) : ?>
+						<?php foreach (array(1 => 'Added', 2 => 'SQL Error', 3 => 'No Category', 4 => 'No Match', 5 => 'Invalid File', 6 => 'Upgraded', 7 => 'Duplicate') as $rID => $rType) : ?>
 							<option value="<?= $rID; ?>"><?= $rType; ?></option>
 						<?php endforeach; ?>
 					</select>
