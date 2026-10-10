@@ -1,6 +1,6 @@
 <?php
 
-use XcVm\Module\Watch\WatchService;
+use XcVm\Module\Watchfolder\WatchService;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -100,11 +100,11 @@ final class WatchServiceTest extends TestCase {
         $this->assertSame(0, (int) $this->db->get_col());
     }
 
-    // --- Admin API actions (registered from WatchModule::boot()) -------------
+    // --- Admin API actions (registered from WatchfolderModule::boot()) -------------
 
     public function testBootRegistersTheFolderActionsOfTheAdminApi(): void {
         \XcVm\Core\Module\AdminApiRegistry::reset();
-        (new \XcVm\Module\Watch\WatchModule())->boot(\XcVm\Core\Container\ServiceContainer::getInstance());
+        (new \XcVm\Module\Watchfolder\WatchfolderModule())->boot(\XcVm\Core\Container\ServiceContainer::getInstance());
 
         foreach (array('get_watch_folders', 'get_watch_folder', 'create_watch_folder', 'edit_watch_folder', 'delete_watch_folder', 'reload_watch_folder') as $rAction) {
             $this->assertNotNull(\XcVm\Core\Module\AdminApiRegistry::get($rAction), $rAction);

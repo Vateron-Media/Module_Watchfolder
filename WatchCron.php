@@ -1,6 +1,6 @@
 <?php
 
-namespace XcVm\Module\Watch;
+namespace XcVm\Module\Watchfolder;
 
 use XcVm\Core\Config\SettingsManager;
 use XcVm\Core\Process\Multithread;

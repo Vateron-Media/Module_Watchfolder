@@ -1,9 +1,9 @@
 {
-    "name": "watch",
+    "name": "watchfolder",
     "hash_id": "2541abe329f151202d7a3c4ecfb17db4",
     "description": "Automatic folder watcher: scans local or rclone directories for new movies and TV episodes and hands each file to core's vod_import_item (TMDb match, import, bouquets, auto-upgrade, encoding); keeps the per-file import log.",
     "version": "1.1.3",
-    "requires_core": ">=2.6.1",
+    "requires_core": ">=2.6.3",
     "environment": "any",
     "dependencies": [],
     "optional_dependencies": [],

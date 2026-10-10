@@ -3,7 +3,7 @@
 /**
  * Test bootstrap for the standalone Module_Watchfolder repository.
  *
- * The module ships namespaced under XcVm\Module\Watch but is only installed
+ * The module ships namespaced under XcVm\Module\Watchfolder but is only installed
  * (physically copied under XC_VM/src/Modules/<hash>/) at deploy time — in this
  * dev checkout it lives as a sibling of XC_VM. We reuse XC_VM's own test
  * bootstrap (composer autoload, MAIN_HOME, the TestDb SQLite double) from the
@@ -44,4 +44,4 @@ foreach (array(WATCH_TMP_PATH, CONFIG_PATH, CACHE_TMP_PATH) as $rDir) {
 require_once dirname(__DIR__) . '/WatchCron.php';
 require_once dirname(__DIR__) . '/WatchService.php';
 require_once dirname(__DIR__) . '/WatchController.php';
-require_once dirname(__DIR__) . '/WatchModule.php';
+require_once dirname(__DIR__) . '/WatchfolderModule.php';
