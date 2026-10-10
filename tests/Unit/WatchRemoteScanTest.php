@@ -4,7 +4,13 @@ use PHPUnit\Framework\TestCase;
 use XcVm\Core\Cluster\NodeFlows;
 use XcVm\Core\Cluster\NodeRole;
 use XcVm\Core\Cluster\NodeRpc;
+use XcVm\Core\Config\SettingsManager;
+use XcVm\Core\Events\EventDispatcher;
+use XcVm\Core\Events\Vod\VodImportResultEvent;
 use XcVm\Domain\Cluster\NodeRegistry;
+use XcVm\Domain\Vod\VodItemImporter;
+use XcVm\Infrastructure\Database\DatabaseFactory;
+use XcVm\Infrastructure\Tmdb\TmdbApiService;
 use XcVm\Module\Watch\WatchCron;
 use XcVm\Tests\Support\InstallSchema;
 
@@ -76,9 +82,70 @@ final class WatchRemoteScanTest extends TestCase {
         $this->assertSame(array('s:2:/mnt/films/old.mkv', 's:2:/mnt/films/seen.mkv'), array_column($rItems, 'file'));
         $this->assertTrue($rItems[0]['import']);
         $this->assertSame(array(2), $rItems[0]['servers']);
+        $this->assertSame(array('old', 0, 0), array($rItems[0]['title'], $rItems[0]['direct_source'], $rItems[0]['direct_proxy']), 'what import mode reads: the name to match, and no direct source');
         $this->assertSame(array(0, 0), array($rItems[0]['ffprobe_input'], $rItems[0]['extract_metadata']), 'no ffprobe here, where the file is not');
         $this->assertSame(2, $rItems[0]['subtitles']['location']);
         $this->assertSame(array(), $rItems[1]['subtitles']);
+    }
+
+    /**
+     * What MAIN queues for another server's file goes through core's importer
+     * as Series → Import's does: matched on the file's name, and a stream on
+     * that server. Import mode reads the name from `title` alone: without
+     * one the parser had nothing, and every file ended "No TMDb match".
+     */
+    public function testAnotherServersEpisodeGoesThroughTheImporter(): void {
+        TmdbApiService::requireLibrary();
+        $rDb = new TestDb();
+        $rDb->exec('CREATE TABLE streams (id INTEGER PRIMARY KEY AUTO_INCREMENT, `type` int NULL, `stream_source` mediumtext NULL, `target_container` varchar(255) NULL, `read_native` tinyint NULL, `movie_symlink` tinyint NULL, `remove_subtitles` tinyint NULL, `transcode_profile_id` int NULL, `direct_source` tinyint NULL, `direct_proxy` tinyint NULL, `order` int NULL, `stream_display_name` mediumtext NULL, `movie_properties` mediumtext NULL, `movie_subtitles` mediumtext NULL, `series_no` int NULL, `added` int NULL, `tmdb_language` varchar(255) NULL);');
+        $rDb->exec('CREATE TABLE streams_servers (stream_id INTEGER, server_id INTEGER, parent_id INTEGER);');
+        $rDb->exec('CREATE TABLE streams_episodes (season_num INTEGER, series_id INTEGER, stream_id INTEGER, episode_num INTEGER);');
+        $rDb->exec('CREATE TABLE streams_series (id INTEGER PRIMARY KEY AUTO_INCREMENT, tmdb_id INTEGER, title TEXT, seasons TEXT);');
+        $rDb->exec("INSERT INTO streams_series (id, tmdb_id, title, seasons) VALUES (5, 1399, 'Les Psys', '[]');");
+        $rDb->exec(InstallSchema::table('watch_categories')); // core's genre map, read when a payload does not pin it
+        DatabaseFactory::set($rDb);
+        VodItemImporter::setDb($rDb);
+        $rGlobalDb = $GLOBALS['db'] ?? null;
+        $GLOBALS['db'] = $rDb;
+        $rSettings = SettingsManager::getAll();
+        SettingsManager::set(array('tmdb_api_key' => '', 'tmdb_language' => '', 'parse_type' => 'guessit', 'fallback_parser' => 0, 'percentage_match' => 80, 'download_images' => 0));
+        $rResults = array();
+        EventDispatcher::listen(VodImportResultEvent::class, static function (VodImportResultEvent $rEvent) use (&$rResults): void {
+            $rResults[] = $rEvent;
+        });
+        $rTmdb = new FakeTmdbClient(array(
+            'searchTVShow' => fn() => array(new TVShow(array('id' => 1399, 'name' => 'Les Psys', 'first_air_date' => '2026-01-01'))),
+            'getTVShow' => fn() => new TVShow(array('id' => 1399, 'name' => 'Les Psys', 'seasons' => array(array('poster_path' => '/s1.jpg')), 'genres' => array(), 'credits' => array('cast' => array(), 'crew' => array()), 'episode_run_time' => array(45))),
+            'getSeason' => fn() => new Season(array('episodes' => array(array('episode_number' => 2, 'name' => 'Épisode 2', 'id' => 222, 'air_date' => '2026-01-08', 'overview' => '', 'vote_average' => 7.1, 'still_path' => null)))),
+        ));
+
+        $rFile = '/mnt/series/Les Psys/Les Psys (2026) - S01E02 - Épisode 2.mkv';
+        $rItems = WatchCron::importItems(self::folder(array('type' => 'series', 'directory' => '/mnt/series')), 2, array($rFile), array($rFile => 1700000000), array(), array(), array(), self::SETTINGS, 0, 1700001000);
+        try {
+            ob_start();
+            try {
+                VodItemImporter::run($rItems[0], 60, $rTmdb);
+            } finally {
+                $rOutput = ob_get_clean();
+            }
+
+            $this->assertCount(1, $rResults, $rOutput);
+            $this->assertSame(VodImportResultEvent::STATUS_IMPORTED, $rResults[0]->status, $rOutput);
+            $rDb->query('SELECT `stream_display_name`, `series_no`, `stream_source`, `direct_source`, `direct_proxy` FROM `streams` WHERE `id` = ?;', $rResults[0]->streamId);
+            $rRow = $rDb->get_row();
+            $this->assertSame('Les Psys - S01E02 - Épisode 2', $rRow['stream_display_name']);
+            $this->assertSame(array('s:2:' . $rFile), json_decode($rRow['stream_source'], true), 'the stream points at the file on its server');
+            $this->assertSame(array(5, 0, 0), array((int) $rRow['series_no'], $rRow['direct_source'], $rRow['direct_proxy']), 'a file on a server\'s disk, not a direct source');
+            $rDb->query('SELECT `server_id` FROM `streams_servers` WHERE `stream_id` = ?;', $rResults[0]->streamId);
+            $this->assertSame('2', (string) $rDb->get_col(), 'and runs there');
+        } finally {
+            EventDispatcher::unlisten(VodImportResultEvent::class);
+            SettingsManager::set($rSettings);
+            DatabaseFactory::reset();
+            $GLOBALS['db'] = $rGlobalDb;
+            @unlink(WATCH_TMP_PATH . 'lock_1399');
+            @unlink(WATCH_TMP_PATH . 'series_1399');
+        }
     }
 
     /** This server's own folders import as before: plain paths, stat'ed here, no import mode. */

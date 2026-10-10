@@ -301,8 +301,12 @@ class WatchService {
 	 * Record a file's import outcome, replacing any earlier row for that file.
 	 *
 	 * @param int    $rType     1 = movie, 2 = series.
-	 * @param int    $rServerID
-	 * @param string $rFilename Raw path or URL (stored HTML-escaped, as the log view expects).
+	 * @param int    $rServerID The server that ran the import.
+	 * @param string $rFilename Raw path or URL (stored HTML-escaped). A file imported for
+	 *                          another server comes as "s:<server>:<path>": it is logged
+	 *                          against that server, by its path, as its own scan logs it
+	 *                          (what the log's server column, Manual Match and
+	 *                          markImported() read).
 	 * @param int    $rStatus   VodImportResultEvent::STATUS_*
 	 * @param int    $rStreamID
 	 * @param string $rTitle    An M3U import's entry name (raw); '' for a folder scan.
@@ -310,6 +314,10 @@ class WatchService {
 	 */
 	public static function logImportResult($rType, $rServerID, $rFilename, $rStatus, $rStreamID = 0, $rTitle = '') {
 		$db = self::db();
+		if (preg_match('/^s:(\d+):(.+)$/s', (string) $rFilename, $rOwn)) {
+			$rServerID = (int) $rOwn[1];
+			$rFilename = $rOwn[2];
+		}
 		$rFilename = htmlspecialchars((string) $rFilename, ENT_QUOTES, 'UTF-8');
 		$db->query('DELETE FROM `watch_logs` WHERE `filename` = ? AND `type` = ? AND `server_id` = ?;', $rFilename, (int) $rType, (int) $rServerID);
 		$db->query('INSERT INTO `watch_logs`(`type`, `server_id`, `filename`, `title`, `status`, `stream_id`) VALUES(?, ?, ?, ?, ?, ?);', (int) $rType, (int) $rServerID, $rFilename, (string) $rTitle === '' ? null : (string) $rTitle, (int) $rStatus, (int) $rStreamID);

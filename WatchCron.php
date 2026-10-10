@@ -422,8 +422,10 @@ class WatchCron {
                     if ($rRemote) {
                         // Imported here for that server, as Movies → Import does: the stream
                         // points at its file and runs there. ffprobe would run here, where the
-                        // file is not, so the match is on the file name.
-                        $rData = array_merge($rData, array('import' => true, 'file' => 's:' . $rServerID . ':' . $rFile, 'servers' => array($rServerID), 'ffprobe_input' => 0, 'extract_metadata' => 0));
+                        // file is not, so the match is on the file name: `title`, the only
+                        // name an import is matched on. A file on a server's disk is no
+                        // direct source.
+                        $rData = array_merge($rData, array('import' => true, 'file' => 's:' . $rServerID . ':' . $rFile, 'title' => $rPathInfo['filename'], 'servers' => array($rServerID), 'direct_source' => 0, 'direct_proxy' => 0, 'ffprobe_input' => 0, 'extract_metadata' => 0));
                     }
                     $rThreadData[] = $rData;
                     if (0 < $rMaxFilesPerRun && count($rThreadData) == $rMaxFilesPerRun) {
