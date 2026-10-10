@@ -11,7 +11,7 @@ use XcVm\Domain\Cluster\NodeRegistry;
 use XcVm\Domain\Vod\VodItemImporter;
 use XcVm\Infrastructure\Database\DatabaseFactory;
 use XcVm\Infrastructure\Tmdb\TmdbApiService;
-use XcVm\Module\Watch\WatchCron;
+use XcVm\Module\Watchfolder\WatchCron;
 use XcVm\Tests\Support\InstallSchema;
 
 /**

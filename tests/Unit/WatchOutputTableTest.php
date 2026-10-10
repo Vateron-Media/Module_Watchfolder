@@ -1,8 +1,8 @@
 <?php
 
 use PHPUnit\Framework\TestCase;
-use XcVm\Module\Watch\WatchController;
-use XcVm\Module\Watch\WatchService;
+use XcVm\Module\Watchfolder\WatchController;
+use XcVm\Module\Watchfolder\WatchService;
 
 /**
  * The watch log's table rows. A filename is stored HTML-escaped
